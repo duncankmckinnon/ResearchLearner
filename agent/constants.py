@@ -1,3 +1,3 @@
-PROJECT_NAME = "research_agent"
-AGENT_NAME = "openai_llm"
+PROJECT_NAME = "research_learner"
+AGENT_NAME = "research_agent"
 SPAN_TYPE = "agent"

@@ -20,19 +20,25 @@ from mcp.types import (
     LoggingLevel
 )
 from agent.langgraph_agent import LangGraphResearchAgent
-from agent.knowledge_graph import KnowledgeGraphManager
+from opentelemetry import trace
+from agent.constants import PROJECT_NAME
 import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("research-mcp-server")
 
+# Initialize tracer
+tracer = trace.get_tracer(PROJECT_NAME)
+
 # Create MCP server instance
 server = Server("research-agent")
 
-# Initialize research agent and knowledge graph
-research_agent = LangGraphResearchAgent()
-knowledge_graph = KnowledgeGraphManager()
+# Initialize research agent with shared knowledge graph
+research_agent = LangGraphResearchAgent(trace_provider=tracer)
+
+# Get the shared knowledge graph instance from the agent
+knowledge_graph = research_agent.knowledge_graph
 
 @server.list_tools()
 async def handle_list_tools() -> List[Tool]:

@@ -40,9 +40,10 @@ class SimpleArxivClient:
                 sort_by=arxiv.SortCriterion.Relevance
             )
             
-            # Execute search
+            # Create client and execute search
+            client = arxiv.Client()
             papers = []
-            for result in search.results():
+            for result in client.results(search):
                 paper_data = {
                     "id": result.entry_id.split("/")[-1],  # Extract arXiv ID
                     "title": result.title,
@@ -80,7 +81,8 @@ class SimpleArxivClient:
             
             # Search for the specific paper
             search = arxiv.Search(id_list=[paper_id])
-            paper = next(search.results(), None)
+            client = arxiv.Client()
+            paper = next(client.results(search), None)
             
             if not paper:
                 return ArxivResult(
@@ -120,7 +122,8 @@ class SimpleArxivClient:
             
             # First get the paper metadata
             search = arxiv.Search(id_list=[paper_id])
-            paper = next(search.results(), None)
+            client = arxiv.Client()
+            paper = next(client.results(search), None)
             
             if not paper:
                 return ArxivResult(

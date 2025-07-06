@@ -6,16 +6,21 @@ Test script for the research agent with ArXiv MCP server integration
 import asyncio
 import logging
 from agent.langgraph_agent import LangGraphResearchAgent
+from opentelemetry import trace
+from agent.constants import PROJECT_NAME
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("test_research_agent")
 
+# Initialize tracer for testing
+tracer = trace.get_tracer(PROJECT_NAME)
+
 async def test_research_agent():
     """Test the research agent functionality"""
     
-    # Initialize the agent
-    agent = LangGraphResearchAgent()
+    # Initialize the agent with trace provider for consistency
+    agent = LangGraphResearchAgent(trace_provider=tracer)
     
     # Test cases
     test_cases = [
@@ -114,9 +119,9 @@ async def test_knowledge_graph():
     print(f"{'='*60}")
     
     try:
-        from agent.knowledge_graph import KnowledgeGraphManager
-        
-        kg = KnowledgeGraphManager()
+        # Use the shared knowledge graph instance from the agent
+        agent = LangGraphResearchAgent(trace_provider=tracer)
+        kg = agent.knowledge_graph
         
         # Test adding an insight
         success = kg.add_research_insight(

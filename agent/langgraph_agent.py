@@ -7,10 +7,10 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
-from opentelemetry.trace import TraceProvider
 from agent.arxiv_client import SimpleResearchAgent
 from agent.knowledge_graph import KnowledgeGraphManager
 import asyncio
+import contextvars
 import logging
 import os
 from dotenv import load_dotenv
@@ -186,10 +186,10 @@ class PlanningNode:
 class ResearchExecutionNode:
     """Node for executing research tasks"""
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager):
         self.llm = llm
         self.research_agent = SimpleResearchAgent()
-        self.knowledge_graph = KnowledgeGraphManager()
+        self.knowledge_graph = knowledge_graph
         self.topic_extraction_prompt = ChatPromptTemplate.from_messages([
             ("system", """Extract the main research topic or keywords from the user's request.
             
@@ -325,9 +325,9 @@ class ResearchExecutionNode:
 class KnowledgeQueryNode:
     """Node for querying existing knowledge"""
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager):
         self.llm = llm
-        self.knowledge_graph = KnowledgeGraphManager()
+        self.knowledge_graph = knowledge_graph
     
     async def __call__(self, state: AgentState) -> AgentState:
         """Execute knowledge query tasks"""
@@ -446,17 +446,20 @@ class ResponseGenerationNode:
 class LangGraphResearchAgent:
     """Main LangGraph-based research agent"""
     
-    def __init__(self, trace_provider: TraceProvider):
+    def __init__(self, trace_provider=None):
         self.llm = ChatOpenAI(
             model=os.getenv("OPENAI_MODEL", "gpt-4o"),
             temperature=float(os.getenv("OPENAI_TEMPERATURE", 0.1))
         )
         
-        # Initialize nodes
+        # Create shared knowledge graph manager instance
+        self.knowledge_graph = KnowledgeGraphManager(trace_provider=trace_provider)
+        
+        # Initialize nodes with shared knowledge graph
         self.intent_node = IntentDetectionNode(self.llm)
         self.planning_node = PlanningNode(self.llm)
-        self.research_node = ResearchExecutionNode(self.llm)
-        self.knowledge_node = KnowledgeQueryNode(self.llm)
+        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph)
+        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph)
         self.response_node = ResponseGenerationNode(self.llm)
         
         # Build graph
@@ -520,21 +523,35 @@ class LangGraphResearchAgent:
     
     def _async_research_wrapper(self, state: AgentState) -> AgentState:
         """Wrapper to handle async research execution"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self.research_node(state))
-        finally:
-            loop.close()
+        # Preserve the current OpenTelemetry context
+        ctx = contextvars.copy_context()
+        
+        def run_with_context():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self.research_node(state))
+            finally:
+                loop.close()
+        
+        # Run in the preserved context
+        return ctx.run(run_with_context)
     
     def _async_knowledge_wrapper(self, state: AgentState) -> AgentState:
         """Wrapper to handle async knowledge query execution"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self.knowledge_node(state))
-        finally:
-            loop.close()
+        # Preserve the current OpenTelemetry context
+        ctx = contextvars.copy_context()
+        
+        def run_with_context():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self.knowledge_node(state))
+            finally:
+                loop.close()
+        
+        # Run in the preserved context
+        return ctx.run(run_with_context)
     
     def _route_by_intent(self, state: AgentState) -> str:
         """Route to appropriate execution node based on intent"""
