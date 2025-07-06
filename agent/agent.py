@@ -47,12 +47,14 @@ class Agent:
         conversation_hash = message.conversation_hash
         request = message.customer_message
         
-        # Get or create session
-        if self.cache.get(conversation_hash):
-            context, session_id = self.cache.get(conversation_hash)
-        else:
+        # Get or create session context
+        stuff = self.cache.get(conversation_hash)
+        if not stuff:
             context = "start"
-            session_id = self.cache.set(conversation_hash)
+            session_id = self.cache.set(conversation_hash, [{"context": context}])
+        else:
+            context = stuff[0]
+            session_id = stuff[1]
         
         current_span = trace.get_current_span()
         current_span.set_attribute(SpanAttributes.SESSION_ID, str(session_id))

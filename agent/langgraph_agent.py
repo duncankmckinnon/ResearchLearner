@@ -7,6 +7,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from opentelemetry import trace
 from openinference.semconv.trace import SpanAttributes
+from agent.constants import PROJECT_NAME
 from agent.arxiv_client import SimpleResearchAgent
 from agent.knowledge_graph import KnowledgeGraphManager
 import asyncio
@@ -54,16 +55,16 @@ class IntentDetectionNode:
             - "What did I learn about neural networks?" -> knowledge_query
             - "Hello, how are you?" -> general
             """),
-            ("human", "{user_request}")
+            ("human", "{user_request}\n\nContext: {context}")
         ])
     
     def __call__(self, state: AgentState) -> AgentState:
         """Detect intent from user request"""
         try:
             user_request = state["user_request"]
-            
+            context = state["context"]
             response = self.llm.invoke(
-                self.prompt.format_messages(user_request=user_request)
+                self.prompt.format_messages(user_request=user_request, context=context)
             )
             
             intent = response.content.strip().lower()
@@ -120,7 +121,7 @@ class PlanningNode:
             
             Respond with a JSON list of steps as strings.
             """),
-            ("human", "Intent: {intent}\nUser request: {user_request}")
+            ("human", "Intent: {intent}\nUser request: {user_request}\nContext: {context}")
         ])
     
     def __call__(self, state: AgentState) -> AgentState:
@@ -128,9 +129,9 @@ class PlanningNode:
         try:
             intent = state["intent"]
             user_request = state["user_request"]
-            
+            context = state["context"]
             response = self.llm.invoke(
-                self.prompt.format_messages(intent=intent, user_request=user_request)
+                self.prompt.format_messages(intent=intent, user_request=user_request, context=context)
             )
             
             # Parse the JSON response
@@ -156,7 +157,7 @@ class PlanningNode:
         
         return state
     
-    def _get_default_plan(self, intent: str) -> List[str]:
+    def _get_default_plan(self, intent: str | None) -> List[str]:
         """Get default plan for each intent type"""
         defaults = {
             "research": [
@@ -186,9 +187,10 @@ class PlanningNode:
 class ResearchExecutionNode:
     """Node for executing research tasks"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, research_agent: SimpleResearchAgent, tracer: trace.Tracer):
         self.llm = llm
-        self.research_agent = SimpleResearchAgent()
+        self.research_agent = research_agent
+        self.tracer = tracer
         self.knowledge_graph = knowledge_graph
         self.topic_extraction_prompt = ChatPromptTemplate.from_messages([
             ("system", """Extract the main research topic or keywords from the user's request.
@@ -231,8 +233,18 @@ class ResearchExecutionNode:
             elif "search" in current_action.lower():
                 # Search for papers
                 topic = state["research_data"].get("topic", user_request)
-                research_result = await self.research_agent.research_topic(topic, max_papers=10)
-                
+
+                with self.tracer.start_as_current_span(
+                    "research_topic",
+                    attributes={
+                        SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
+                        SpanAttributes.TOOL_NAME: "research_topic"
+                    }
+                ) as tool_span:
+                    tool_span.set_attribute(SpanAttributes.INPUT_VALUE, topic)  
+                    research_result = await self.research_agent.research_topic(topic, max_papers=10)
+                    tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"papers_found": research_result.get("papers_found", 0)}))
+
                 if not state["research_data"]:
                     state["research_data"] = {}
                 state["research_data"]["search_results"] = research_result
@@ -240,7 +252,7 @@ class ResearchExecutionNode:
                 papers_found = research_result.get("papers_found", 0)
                 state["messages"].append(AIMessage(content=f"Found {papers_found} relevant papers"))
                 
-            elif "analyze" in current_action.lower():
+            elif "analyze" in current_action.lower() and "research_data" in state and isinstance(state["research_data"], dict):
                 # Analyze findings
                 search_results = state["research_data"].get("search_results", {})
                 papers = search_results.get("papers", [])
@@ -251,11 +263,29 @@ class ResearchExecutionNode:
                     for paper in papers[:3]:  # Analyze top 3 papers
                         paper_id = paper.get("id", "").replace("http://arxiv.org/abs/", "")
                         if paper_id:
-                            analysis = await self.research_agent.analyze_paper(paper_id)
+                            with self.tracer.start_as_current_span(
+                                "analyze_paper",
+                                attributes={
+                                    SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
+                                    SpanAttributes.TOOL_NAME: "analyze_paper"
+                                }
+                            ) as tool_span:
+                                tool_span.set_attribute(SpanAttributes.INPUT_VALUE, paper_id)
+                                analysis = await self.research_agent.analyze_paper(paper_id)
+                                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"analysis": analysis}))
                             if "error" not in analysis:
                                 analyzed_papers.append(analysis)
                                 # Add paper to knowledge graph
-                                self.knowledge_graph.add_research_paper(analysis)
+                                with self.tracer.start_as_current_span(
+                                    "add_research_paper",
+                                    attributes={
+                                        SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
+                                        SpanAttributes.TOOL_NAME: "add_research_paper"
+                                    }
+                                ) as tool_span:
+                                    tool_span.set_attribute(SpanAttributes.INPUT_VALUE, paper_id)
+                                    self.knowledge_graph.add_research_paper(analysis)
+                                    tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"paper_added": True}))
                     
                     state["research_data"]["analyzed_papers"] = analyzed_papers
                     state["messages"].append(AIMessage(content=f"Analyzed {len(analyzed_papers)} papers and added to knowledge graph"))
@@ -325,9 +355,10 @@ class ResearchExecutionNode:
 class KnowledgeQueryNode:
     """Node for querying existing knowledge"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, tracer: trace.Tracer):
         self.llm = llm
         self.knowledge_graph = knowledge_graph
+        self.tracer = tracer
     
     async def __call__(self, state: AgentState) -> AgentState:
         """Execute knowledge query tasks"""
@@ -343,7 +374,16 @@ class KnowledgeQueryNode:
             
             if "search" in current_action.lower() and "knowledge" in current_action.lower():
                 # Search existing knowledge
-                knowledge_results = self.knowledge_graph.search_knowledge(user_request, limit=10)
+                with self.tracer.start_as_current_span(
+                    "search_knowledge",
+                    attributes={
+                        SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
+                        SpanAttributes.TOOL_NAME: "search_knowledge"
+                    }
+                ) as tool_span:
+                    tool_span.set_attribute(SpanAttributes.INPUT_VALUE, user_request)
+                    knowledge_results = self.knowledge_graph.search_knowledge(user_request, limit=10)
+                    tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"knowledge_results": knowledge_results}))
                 
                 if not state["knowledge_data"]:
                     state["knowledge_data"] = {}
@@ -381,7 +421,8 @@ class KnowledgeQueryNode:
     async def _formulate_knowledge_response(self, knowledge_data: Dict, user_request: str) -> str:
         """Formulate response based on knowledge data"""
         try:
-            prompt = f"""
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """
             Based on the following knowledge from the knowledge base, formulate a comprehensive response to the user's request.
             
             User Request: {user_request}
@@ -390,9 +431,11 @@ class KnowledgeQueryNode:
             {json.dumps(knowledge_data, indent=2)}
             
             Provide a helpful and informative response that addresses the user's question using the available knowledge.
-            """
+            """),
+            ("human", "User request: {user_request}\n\nKnowledge data: {knowledge_data}")
+        ])
             
-            response = self.llm.invoke([HumanMessage(content=prompt)])
+            response = self.llm.invoke(prompt.format_messages(user_request=user_request, knowledge_data=json.dumps(knowledge_data, indent=2)))
             return response.content
             
         except Exception as e:
@@ -446,20 +489,23 @@ class ResponseGenerationNode:
 class LangGraphResearchAgent:
     """Main LangGraph-based research agent"""
     
-    def __init__(self, trace_provider=None):
+    def __init__(self, tracer=None):
         self.llm = ChatOpenAI(
             model=os.getenv("OPENAI_MODEL", "gpt-4o"),
             temperature=float(os.getenv("OPENAI_TEMPERATURE", 0.1))
         )
         
         # Create shared knowledge graph manager instance
-        self.knowledge_graph = KnowledgeGraphManager(trace_provider=trace_provider)
+        self.tracer = tracer
+        self.knowledge_graph = KnowledgeGraphManager(tracer=self.tracer)
+        self.research_agent = SimpleResearchAgent()
+        
         
         # Initialize nodes with shared knowledge graph
         self.intent_node = IntentDetectionNode(self.llm)
         self.planning_node = PlanningNode(self.llm)
-        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph)
-        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph)
+        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph, self.research_agent, self.tracer)
+        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph, self.tracer)
         self.response_node = ResponseGenerationNode(self.llm)
         
         # Build graph
