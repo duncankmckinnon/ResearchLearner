@@ -33,6 +33,7 @@ class AgentState(TypedDict):
     final_response: Optional[str]
     user_request: str
     session_id: str
+    context: str
 
 class IntentDetectionNode:
     """Node for detecting user intent"""
@@ -97,7 +98,7 @@ class PlanningNode:
         try:
             intent = state["intent"]
             user_request = state["user_request"]
-            context = ""  # Add context handling if needed
+            context = state["context"]
             
             # Prepare prompt template variables
             template_variables = {
@@ -347,6 +348,7 @@ class KnowledgeQueryNode:
             current_step = state["current_step"]
             plan = state["plan"]
             user_request = state["user_request"]
+            context = state["context"]
             
             if current_step >= len(plan):
                 return state
@@ -617,7 +619,7 @@ class LangGraphResearchAgent:
         
         return "continue"
     
-    async def process_request(self, user_request: str, session_id: str) -> Dict[str, Any]:
+    async def process_request(self, user_request: str, session_id: str, context: str) -> Dict[str, Any]:
         """Process a user request through the LangGraph workflow"""
         try:
             # Initialize state
@@ -630,7 +632,8 @@ class LangGraphResearchAgent:
                 knowledge_data=None,
                 final_response=None,
                 user_request=user_request,
-                session_id=session_id
+                session_id=session_id,
+                context=context
             )
             
             # Configure run

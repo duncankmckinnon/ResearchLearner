@@ -67,7 +67,7 @@ class Agent:
                 asyncio.set_event_loop(loop)
                 try:
                     result = loop.run_until_complete(
-                        self.langgraph_agent.process_request(request, session_id)
+                        self.langgraph_agent.process_request(request, session_id, context)
                     )
                     
                     response = result.get("response", "No response generated")
