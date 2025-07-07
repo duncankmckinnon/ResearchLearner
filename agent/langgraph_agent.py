@@ -10,6 +10,7 @@ from openinference.semconv.trace import SpanAttributes
 from agent.constants import PROJECT_NAME
 from agent.arxiv_client import SimpleResearchAgent
 from agent.knowledge_graph import KnowledgeGraphManager
+from agent.prompts import Prompts
 import asyncio
 import contextvars
 import logging
@@ -35,36 +36,17 @@ class AgentState(TypedDict):
 class IntentDetectionNode:
     """Node for detecting user intent"""
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, prompts: Prompts):
         self.llm = llm
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at analyzing user requests and determining their intent.
-            
-            Analyze the user's request and determine the primary intent. Choose from these categories:
-            
-            1. "research" - User wants to research a topic, find papers, get academic insights
-            2. "analysis" - User wants to analyze specific papers or research findings
-            3. "knowledge_query" - User wants to query existing knowledge base
-            4. "general" - General conversation, questions not related to research
-            
-            Respond with ONLY the intent category as a single word.
-            
-            Examples:
-            - "Find papers about transformer architectures" -> research
-            - "Analyze the paper arxiv:2023.12345" -> analysis
-            - "What did I learn about neural networks?" -> knowledge_query
-            - "Hello, how are you?" -> general
-            """),
-            ("human", "{user_request}\n\nContext: {context}")
-        ])
+        self.prompts = prompts
     
     def __call__(self, state: AgentState) -> AgentState:
         """Detect intent from user request"""
         try:
             user_request = state["user_request"]
-            context = state["context"]
+            context = ""  # Add context handling if needed
             response = self.llm.invoke(
-                self.prompt.format_messages(user_request=user_request, context=context)
+                self.prompts.intent_detection_prompt.format_messages(user_request=user_request, context=context)
             )
             
             intent = response.content.strip().lower()
@@ -89,49 +71,18 @@ class IntentDetectionNode:
 class PlanningNode:
     """Node for creating execution plans"""
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, prompts: Prompts):
         self.llm = llm
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at creating execution plans for different types of requests.
-            
-            Based on the user's request and detected intent, create a step-by-step plan.
-            
-            For "research" intent, typical steps might include:
-            1. Extract research topic/keywords
-            2. Search for relevant papers
-            3. Download and analyze top papers
-            4. Synthesize findings
-            5. Present results
-            
-            For "analysis" intent, typical steps might include:
-            1. Identify specific papers/documents
-            2. Download or retrieve content
-            3. Analyze content thoroughly
-            4. Extract key insights
-            5. Present analysis
-            
-            For "knowledge_query" intent, typical steps might include:
-            1. Search knowledge base
-            2. Retrieve relevant information
-            3. Synthesize response
-            
-            For "general" intent, typical steps might include:
-            1. Understand the question
-            2. Formulate response
-            
-            Respond with a JSON list of steps as strings.
-            """),
-            ("human", "Intent: {intent}\nUser request: {user_request}\nContext: {context}")
-        ])
+        self.prompts = prompts
     
     def __call__(self, state: AgentState) -> AgentState:
         """Create execution plan based on intent"""
         try:
             intent = state["intent"]
             user_request = state["user_request"]
-            context = state["context"]
+            context = ""  # Add context handling if needed
             response = self.llm.invoke(
-                self.prompt.format_messages(intent=intent, user_request=user_request, context=context)
+                self.prompts.planning_prompt.format_messages(intent=intent, user_request=user_request, context=context)
             )
             
             # Parse the JSON response
@@ -187,24 +138,12 @@ class PlanningNode:
 class ResearchExecutionNode:
     """Node for executing research tasks"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, research_agent: SimpleResearchAgent, tracer: trace.Tracer):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, research_agent: SimpleResearchAgent, tracer: trace.Tracer, prompts: Prompts):
         self.llm = llm
         self.research_agent = research_agent
         self.tracer = tracer
         self.knowledge_graph = knowledge_graph
-        self.topic_extraction_prompt = ChatPromptTemplate.from_messages([
-            ("system", """Extract the main research topic or keywords from the user's request.
-            
-            Focus on the core subject matter they want to research.
-            Respond with just the topic/keywords, no additional text.
-            
-            Examples:
-            - "Find papers about transformer architectures" -> "transformer architectures"
-            - "Research quantum computing applications" -> "quantum computing applications"
-            - "I want to learn about neural networks" -> "neural networks"
-            """),
-            ("human", "{user_request}")
-        ])
+        self.prompts = prompts
     
     async def __call__(self, state: AgentState) -> AgentState:
         """Execute research tasks"""
@@ -221,7 +160,7 @@ class ResearchExecutionNode:
             if "extract" in current_action.lower() and "topic" in current_action.lower():
                 # Extract research topic
                 response = self.llm.invoke(
-                    self.topic_extraction_prompt.format_messages(user_request=user_request)
+                    self.prompts.topic_extraction_prompt.format_messages(user_request=user_request)
                 )
                 topic = response.content.strip()
                 
@@ -355,10 +294,11 @@ class ResearchExecutionNode:
 class KnowledgeQueryNode:
     """Node for querying existing knowledge"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, tracer: trace.Tracer):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, tracer: trace.Tracer, prompts: Prompts):
         self.llm = llm
         self.knowledge_graph = knowledge_graph
         self.tracer = tracer
+        self.prompts = prompts
     
     async def __call__(self, state: AgentState) -> AgentState:
         """Execute knowledge query tasks"""
@@ -421,21 +361,12 @@ class KnowledgeQueryNode:
     async def _formulate_knowledge_response(self, knowledge_data: Dict, user_request: str) -> str:
         """Formulate response based on knowledge data"""
         try:
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", """
-            Based on the following knowledge from the knowledge base, formulate a comprehensive response to the user's request.
-            
-            User Request: {user_request}
-            
-            Knowledge Data:
-            {json.dumps(knowledge_data, indent=2)}
-            
-            Provide a helpful and informative response that addresses the user's question using the available knowledge.
-            """),
-            ("human", "User request: {user_request}\n\nKnowledge data: {knowledge_data}")
-        ])
-            
-            response = self.llm.invoke(prompt.format_messages(user_request=user_request, knowledge_data=json.dumps(knowledge_data, indent=2)))
+            response = self.llm.invoke(
+                self.prompts.knowledge_response_prompt.format_messages(
+                    user_request=user_request, 
+                    knowledge_data=json.dumps(knowledge_data, indent=2)
+                )
+            )
             return response.content
             
         except Exception as e:
@@ -445,23 +376,9 @@ class KnowledgeQueryNode:
 class ResponseGenerationNode:
     """Node for generating final responses"""
     
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: ChatOpenAI, prompts: Prompts):
         self.llm = llm
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful research assistant. Generate a comprehensive response based on the research data and user request.
-            
-            If research data is available, include:
-            - Key findings from the research
-            - Relevant paper citations
-            - Actionable insights
-            - Suggestions for further research
-            
-            If no research data is available, provide a helpful general response.
-            
-            Be conversational but informative.
-            """),
-            ("human", "User request: {user_request}\n\nResearch data: {research_data}\n\nGenerate a comprehensive response.")
-        ])
+        self.prompts = prompts
     
     def __call__(self, state: AgentState) -> AgentState:
         """Generate final response"""
@@ -470,7 +387,7 @@ class ResponseGenerationNode:
             research_data = state.get("research_data", {})
             
             response = self.llm.invoke(
-                self.prompt.format_messages(
+                self.prompts.response_generation_prompt.format_messages(
                     user_request=user_request,
                     research_data=json.dumps(research_data, indent=2) if research_data else "No research data available"
                 )
@@ -500,13 +417,15 @@ class LangGraphResearchAgent:
         self.knowledge_graph = KnowledgeGraphManager(tracer=self.tracer)
         self.research_agent = SimpleResearchAgent()
         
+        # Create prompts instance
+        self.prompts = Prompts()
         
-        # Initialize nodes with shared knowledge graph
-        self.intent_node = IntentDetectionNode(self.llm)
-        self.planning_node = PlanningNode(self.llm)
-        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph, self.research_agent, self.tracer)
-        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph, self.tracer)
-        self.response_node = ResponseGenerationNode(self.llm)
+        # Initialize nodes with shared knowledge graph and prompts
+        self.intent_node = IntentDetectionNode(self.llm, self.prompts)
+        self.planning_node = PlanningNode(self.llm, self.prompts)
+        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph, self.research_agent, self.tracer, self.prompts)
+        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph, self.tracer, self.prompts)
+        self.response_node = ResponseGenerationNode(self.llm, self.prompts)
         
         # Build graph
         self.graph = self._build_graph()
