@@ -418,8 +418,4 @@ The MCP server provides:
 
 ## License
 
-[Add your license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
