@@ -5,8 +5,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
-from opentelemetry import trace
+from opentelemetry import trace, context
 from openinference.semconv.trace import SpanAttributes
+from openinference.instrumentation import using_prompt_template
 from agent.constants import PROJECT_NAME
 from agent.arxiv_client import SimpleResearchAgent
 from agent.knowledge_graph import KnowledgeGraphManager
@@ -44,11 +45,27 @@ class IntentDetectionNode:
         """Detect intent from user request"""
         try:
             user_request = state["user_request"]
-            context = ""  # Add context handling if needed
-            response = self.llm.invoke(
-                self.prompts.intent_detection_prompt.format_messages(user_request=user_request, context=context)
-            )
+            context = state["context"]
             
+            # Prepare prompt template variables
+            template_variables = {
+                "user_request": user_request,
+                "context": context
+            }
+            
+            # Get the template string from the prompt
+            template_messages = self.prompts.intent_detection_prompt.messages
+            template_string = f"{template_messages[0].prompt.template}\n\nUser: {template_messages[1].prompt.template}"
+            
+            with using_prompt_template(
+                template=template_string,
+                variables=template_variables,
+                version="v1.0"
+            ):
+                response = self.llm.invoke(
+                    self.prompts.intent_detection_prompt.format_messages(**template_variables)
+                )
+        
             intent = response.content.strip().lower()
             
             # Validate intent
@@ -58,7 +75,7 @@ class IntentDetectionNode:
             
             state["intent"] = intent
             state["messages"].append(AIMessage(content=f"Detected intent: {intent}"))
-            
+        
             logger.info(f"Detected intent: {intent} for request: {user_request}")
             
         except Exception as e:
@@ -81,9 +98,26 @@ class PlanningNode:
             intent = state["intent"]
             user_request = state["user_request"]
             context = ""  # Add context handling if needed
-            response = self.llm.invoke(
-                self.prompts.planning_prompt.format_messages(intent=intent, user_request=user_request, context=context)
-            )
+            
+            # Prepare prompt template variables
+            template_variables = {
+                "intent": intent,
+                "user_request": user_request,
+                "context": context
+            }
+            
+            # Get the template string from the prompt
+            template_messages = self.prompts.planning_prompt.messages
+            template_string = f"{template_messages[0].prompt.template}\n\nUser: {template_messages[1].prompt.template}"
+            
+            with using_prompt_template(
+                template=template_string,
+                variables=template_variables,
+                version="v1.0"
+            ):
+                response = self.llm.invoke(
+                    self.prompts.planning_prompt.format_messages(**template_variables)
+                )
             
             # Parse the JSON response
             try:
@@ -138,10 +172,9 @@ class PlanningNode:
 class ResearchExecutionNode:
     """Node for executing research tasks"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, research_agent: SimpleResearchAgent, tracer: trace.Tracer, prompts: Prompts):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, research_agent: SimpleResearchAgent, prompts: Prompts):
         self.llm = llm
         self.research_agent = research_agent
-        self.tracer = tracer
         self.knowledge_graph = knowledge_graph
         self.prompts = prompts
     
@@ -159,9 +192,18 @@ class ResearchExecutionNode:
             
             if "extract" in current_action.lower() and "topic" in current_action.lower():
                 # Extract research topic
-                response = self.llm.invoke(
-                    self.prompts.topic_extraction_prompt.format_messages(user_request=user_request)
-                )
+                template_variables = {"user_request": user_request}
+                template_messages = self.prompts.topic_extraction_prompt.messages
+                template_string = f"{template_messages[0].prompt.template}\n\nUser: {template_messages[1].prompt.template}"
+                
+                with using_prompt_template(
+                    template=template_string,
+                    variables=template_variables,
+                    version="v1.0"
+                ):
+                    response = self.llm.invoke(
+                        self.prompts.topic_extraction_prompt.format_messages(**template_variables)
+                    )
                 topic = response.content.strip()
                 
                 if not state["research_data"]:
@@ -173,7 +215,7 @@ class ResearchExecutionNode:
                 # Search for papers
                 topic = state["research_data"].get("topic", user_request)
 
-                with self.tracer.start_as_current_span(
+                with trace.get_tracer(__name__).start_as_current_span(
                     "research_topic",
                     attributes={
                         SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -202,7 +244,7 @@ class ResearchExecutionNode:
                     for paper in papers[:3]:  # Analyze top 3 papers
                         paper_id = paper.get("id", "").replace("http://arxiv.org/abs/", "")
                         if paper_id:
-                            with self.tracer.start_as_current_span(
+                            with trace.get_tracer(__name__).start_as_current_span(
                                 "analyze_paper",
                                 attributes={
                                     SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -215,7 +257,7 @@ class ResearchExecutionNode:
                             if "error" not in analysis:
                                 analyzed_papers.append(analysis)
                                 # Add paper to knowledge graph
-                                with self.tracer.start_as_current_span(
+                                with trace.get_tracer(__name__).start_as_current_span(
                                     "add_research_paper",
                                     attributes={
                                         SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -294,10 +336,9 @@ class ResearchExecutionNode:
 class KnowledgeQueryNode:
     """Node for querying existing knowledge"""
     
-    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, tracer: trace.Tracer, prompts: Prompts):
+    def __init__(self, llm: ChatOpenAI, knowledge_graph: KnowledgeGraphManager, prompts: Prompts):
         self.llm = llm
         self.knowledge_graph = knowledge_graph
-        self.tracer = tracer
         self.prompts = prompts
     
     async def __call__(self, state: AgentState) -> AgentState:
@@ -314,7 +355,7 @@ class KnowledgeQueryNode:
             
             if "search" in current_action.lower() and "knowledge" in current_action.lower():
                 # Search existing knowledge
-                with self.tracer.start_as_current_span(
+                with trace.get_tracer(__name__).start_as_current_span(
                     "search_knowledge",
                     attributes={
                         SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -361,12 +402,24 @@ class KnowledgeQueryNode:
     async def _formulate_knowledge_response(self, knowledge_data: Dict, user_request: str) -> str:
         """Formulate response based on knowledge data"""
         try:
-            response = self.llm.invoke(
-                self.prompts.knowledge_response_prompt.format_messages(
-                    user_request=user_request, 
-                    knowledge_data=json.dumps(knowledge_data, indent=2)
+            template_variables = {
+                "user_request": user_request,
+                "knowledge_data": json.dumps(knowledge_data, indent=2)
+            }
+            template_messages = self.prompts.knowledge_response_prompt.messages
+            template_string = f"{template_messages[0].prompt.template}\n\nUser: {template_messages[1].prompt.template}"
+            
+            with using_prompt_template(
+                template=template_string,
+                variables=template_variables,
+                version="v1.0"
+            ):
+                response = self.llm.invoke(
+                    self.prompts.knowledge_response_prompt.format_messages(
+                        user_request=user_request, 
+                        knowledge_data=json.dumps(knowledge_data, indent=2)
+                    )
                 )
-            )
             return response.content
             
         except Exception as e:
@@ -385,13 +438,26 @@ class ResponseGenerationNode:
         try:
             user_request = state["user_request"]
             research_data = state.get("research_data", {})
+            research_data_str = json.dumps(research_data, indent=2) if research_data else "No research data available"
             
-            response = self.llm.invoke(
-                self.prompts.response_generation_prompt.format_messages(
-                    user_request=user_request,
-                    research_data=json.dumps(research_data, indent=2) if research_data else "No research data available"
+            template_variables = {
+                "user_request": user_request,
+                "research_data": research_data_str
+            }
+            template_messages = self.prompts.response_generation_prompt.messages
+            template_string = f"{template_messages[0].prompt.template}\n\nUser: {template_messages[1].prompt.template}"
+            
+            with using_prompt_template(
+                template=template_string,
+                variables=template_variables,
+                version="v1.0"
+            ):
+                response = self.llm.invoke(
+                    self.prompts.response_generation_prompt.format_messages(
+                        user_request=user_request,
+                        research_data=research_data_str
+                    )
                 )
-            )
             
             state["final_response"] = response.content
             state["messages"].append(AIMessage(content=response.content))
@@ -412,9 +478,9 @@ class LangGraphResearchAgent:
             temperature=float(os.getenv("OPENAI_TEMPERATURE", 0.1))
         )
         
-        # Create shared knowledge graph manager instance
-        self.tracer = tracer
-        self.knowledge_graph = KnowledgeGraphManager(tracer=self.tracer)
+        # Create shared tracer instance - use provided or get global tracer
+        self.tracer = tracer if tracer else trace.get_tracer(PROJECT_NAME)
+        self.knowledge_graph = KnowledgeGraphManager()
         self.research_agent = SimpleResearchAgent()
         
         # Create prompts instance
@@ -423,8 +489,8 @@ class LangGraphResearchAgent:
         # Initialize nodes with shared knowledge graph and prompts
         self.intent_node = IntentDetectionNode(self.llm, self.prompts)
         self.planning_node = PlanningNode(self.llm, self.prompts)
-        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph, self.research_agent, self.tracer, self.prompts)
-        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph, self.tracer, self.prompts)
+        self.research_node = ResearchExecutionNode(self.llm, self.knowledge_graph, self.research_agent, self.prompts)
+        self.knowledge_node = KnowledgeQueryNode(self.llm, self.knowledge_graph, self.prompts)
         self.response_node = ResponseGenerationNode(self.llm, self.prompts)
         
         # Build graph
@@ -489,15 +555,21 @@ class LangGraphResearchAgent:
     def _async_research_wrapper(self, state: AgentState) -> AgentState:
         """Wrapper to handle async research execution"""
         # Preserve the current OpenTelemetry context
+        current_context = context.get_current()
         ctx = contextvars.copy_context()
         
         def run_with_context():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Attach the OpenTelemetry context to the new event loop
+            token = context.attach(current_context)
             try:
-                return loop.run_until_complete(self.research_node(state))
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(self.research_node(state))
+                finally:
+                    loop.close()
             finally:
-                loop.close()
+                context.detach(token)
         
         # Run in the preserved context
         return ctx.run(run_with_context)
@@ -505,15 +577,21 @@ class LangGraphResearchAgent:
     def _async_knowledge_wrapper(self, state: AgentState) -> AgentState:
         """Wrapper to handle async knowledge query execution"""
         # Preserve the current OpenTelemetry context
+        current_context = context.get_current()
         ctx = contextvars.copy_context()
         
         def run_with_context():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Attach the OpenTelemetry context to the new event loop
+            token = context.attach(current_context)
             try:
-                return loop.run_until_complete(self.knowledge_node(state))
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(self.knowledge_node(state))
+                finally:
+                    loop.close()
             finally:
-                loop.close()
+                context.detach(token)
         
         # Run in the preserved context
         return ctx.run(run_with_context)

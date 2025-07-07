@@ -40,7 +40,7 @@ class Prompts:
             - "What did I learn about neural networks?" -> knowledge_query
             - "Hello, how are you?" -> general
             """),
-            ("human", "{user_request}\n\nContext: {context}")
+            ("human", "User request: {user_request}\n\nContext: {context}")
         ])
 
     @property
@@ -76,7 +76,7 @@ class Prompts:
             
             Respond with a JSON list of steps as strings.
             """),
-            ("human", "Intent: {intent}\nUser request: {user_request}\nContext: {context}")
+            ("human", "Intent: {intent}\n\nUser request: {user_request}\n\nContext: {context}")
         ])
 
     @property
@@ -85,15 +85,16 @@ class Prompts:
         return ChatPromptTemplate.from_messages([
             ("system", """Extract the main research topic or keywords from the user's request.
             
-            Focus on the core subject matter they want to research.
+            Focus on the core subject matter they want to research. 
+            If the subject is clear, include keywords that are related to the subject but not necessarily in the request.   
             Respond with just the topic/keywords, no additional text.
             
             Examples:
-            - "Find papers about transformer architectures" -> "transformer architectures"
+            - "Find papers about transformer architectures" -> "transformer architectures", "attention mechanism"
             - "Research quantum computing applications" -> "quantum computing applications"
-            - "I want to learn about neural networks" -> "neural networks"
+            - "I want to learn about neural networks" -> "neural networks", "deep learning"
             """),
-            ("human", "{user_request}")
+            ("human", "User request: {user_request}")
         ])
 
     @property
@@ -101,12 +102,6 @@ class Prompts:
         """Prompt for formulating knowledge-based responses"""
         return ChatPromptTemplate.from_messages([
             ("system", """Based on the following knowledge from the knowledge base, formulate a comprehensive response to the user's request.
-            
-            User Request: {user_request}
-            
-            Knowledge Data:
-            {knowledge_data}
-            
             Provide a helpful and informative response that addresses the user's question using the available knowledge.
             """),
             ("human", "User request: {user_request}\n\nKnowledge data: {knowledge_data}")
@@ -128,6 +123,6 @@ class Prompts:
             
             Be conversational but informative.
             """),
-            ("human", "User request: {user_request}\n\nResearch data: {research_data}\n\nGenerate a comprehensive response.")
+            ("human", "User request: {user_request}\n\nResearch data: {research_data}")
         ])
 

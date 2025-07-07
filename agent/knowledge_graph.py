@@ -13,8 +13,7 @@ class KnowledgeGraphManager:
     
     def __init__(self, user_id: str = "default", tracer: trace.Tracer = None):
         self.user_id = user_id
-        # Always use global tracer for proper context propagation
-        self.tracer = tracer
+        # Don't store tracer instance - use global tracer for proper context propagation
         self.memory = None
         self._initialize_memory()
     
@@ -138,7 +137,7 @@ class KnowledgeGraphManager:
             return []
         
         try:
-            with self.tracer.start_as_current_span(
+            with trace.get_tracer(__name__).start_as_current_span(
                 "search_knowledge",
                 attributes={
                     SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -172,7 +171,7 @@ class KnowledgeGraphManager:
                 
                 logger.info(f"Found {len(formatted_results)} results for query: {query}")
                 
-                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"results_count": len(formatted_results), "query": query}))
+                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"results": formatted_results, "query": query}))
                 return formatted_results
             
         except Exception as e:
@@ -185,7 +184,7 @@ class KnowledgeGraphManager:
             return []
         
         try:
-            with self.tracer.start_as_current_span(
+            with trace.get_tracer(__name__).start_as_current_span(
                 "get_related_papers",
                 attributes={
                     SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -255,7 +254,7 @@ class KnowledgeGraphManager:
                     except Exception as e:
                         logger.error(f"Error searching ArXiv for additional papers: {str(e)}")
                 
-                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"papers_count": len(papers), "topic": topic}))
+                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({"papers": papers, "topic": topic}))
                 return papers[:limit]  # Ensure we don't exceed the limit
             
         except Exception as e:
@@ -268,7 +267,7 @@ class KnowledgeGraphManager:
             return []
         
         try:
-            with self.tracer.start_as_current_span(
+            with trace.get_tracer(__name__).start_as_current_span(
                 "get_research_insights",
                 attributes={
                     SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
@@ -399,43 +398,27 @@ Key Content: {content[:2000]}...
             return {"error": "Knowledge graph not initialized"}
         
         try:
-            with self.tracer.start_as_current_span(
-                "get_knowledge_summary",
-                attributes={
-                    SpanAttributes.OPENINFERENCE_SPAN_KIND: "TOOL",
-                    SpanAttributes.TOOL_NAME: "get_knowledge_summary"
-                }
-            ) as tool_span:
-                input_data = {"topic": topic}
-                tool_span.set_attribute(SpanAttributes.INPUT_VALUE, json.dumps(input_data))
-                
-                # Get related papers
-                papers = self.get_related_papers(topic, limit=5)
-                
-                # Get research insights
-                insights = self.get_research_insights(topic, limit=10)
-                
-                # Get general knowledge
-                general_knowledge = self.search_knowledge(topic, limit=10)
-                
-                summary = {
-                    "topic": topic,
-                    "related_papers": papers,
-                    "research_insights": insights,
-                    "general_knowledge": general_knowledge,
-                    "total_papers": len(papers),
-                    "total_insights": len(insights),
-                    "total_knowledge_items": len(general_knowledge)
-                }
-                
-                tool_span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps({
-                    "topic": topic,
-                    "total_papers": len(papers),
-                    "total_insights": len(insights),
-                    "total_knowledge_items": len(general_knowledge)
-                }))
-                
-                return summary
+            # Get related papers
+            papers = self.get_related_papers(topic, limit=5)
+            
+            # Get research insights
+            insights = self.get_research_insights(topic, limit=10)
+            
+            # Get general knowledge
+            general_knowledge = self.search_knowledge(topic, limit=10)
+            
+            summary = {
+                "topic": topic,
+                "related_papers": papers,
+                "research_insights": insights,
+                "general_knowledge": general_knowledge,
+                "total_papers": len(papers),
+                "total_insights": len(insights),
+                "total_knowledge_items": len(general_knowledge)
+            }
+            
+            
+            return summary
             
         except Exception as e:
             logger.error(f"Error getting knowledge summary: {str(e)}")
