@@ -4,9 +4,18 @@ from agent.agent import Agent
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
-from agent.schema import RequestFormat, ResponseFormat
+from agent.schema import (
+    RequestFormat, 
+    ResponseFormat, 
+    KnowledgeSearchRequest, 
+    KnowledgeSearchResult, 
+    ResearchPaper, 
+    ResearchInsight, 
+    KnowledgeSummary
+)
 from agent.caching import LRUCache
 from agent.constants import PROJECT_NAME
+from agent.knowledge_graph import get_knowledge_graph_manager
 import logging
 import json
 import asyncio
@@ -29,8 +38,8 @@ tracer_provider = register(
 LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 
 app = FastAPI()
-cache = LRUCache()
-agent = Agent(cache=cache)
+agent = Agent()
+knowledge_graph = get_knowledge_graph_manager()
 
 # Store for tracking ongoing processes
 active_processes = {}
@@ -194,3 +203,194 @@ def get_process_status(process_id: str):
 def list_active_processes():
     """List all active processes"""
     return {"active_processes": list(active_processes.keys()), "count": len(active_processes)}
+
+
+# Knowledge Store Endpoints
+
+@app.post("/knowledge/search")
+def search_knowledge(request: KnowledgeSearchRequest):
+    """Search the knowledge store for relevant information"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        results = kg_manager.search_knowledge(request.query, limit=request.limit)
+        
+        # Convert to Pydantic models
+        search_results = [
+            KnowledgeSearchResult(
+                content=result.get("content", ""),
+                metadata=result.get("metadata", {}),
+                relevance_score=result.get("relevance_score", 0.0),
+                id=result.get("id", "")
+            )
+            for result in results
+        ]
+        
+        return {
+            "results": search_results,
+            "total_results": len(search_results),
+            "query": request.query
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching knowledge store: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge/papers/{topic}")
+def get_related_papers(topic: str, limit: int = 5):
+    """Get research papers related to a specific topic"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        papers_data = kg_manager.get_related_papers(topic, limit=limit)
+        
+        # Convert to Pydantic models
+        papers = [
+            ResearchPaper(
+                title=paper.get("title", ""),
+                authors=paper.get("authors", []),
+                arxiv_id=paper.get("arxiv_id", ""),
+                categories=paper.get("categories", []),
+                relevance_score=paper.get("relevance_score", 0.0),
+                content=paper.get("content", ""),
+                source=paper.get("source", "unknown")
+            )
+            for paper in papers_data
+        ]
+        
+        return {
+            "papers": papers,
+            "total_papers": len(papers),
+            "topic": topic
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving related papers: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge/insights/{topic}")
+def get_research_insights(topic: str, limit: int = 10):
+    """Get research insights for a specific topic"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        insights_data = kg_manager.get_research_insights(topic, limit=limit)
+        
+        # Convert to Pydantic models
+        insights = [
+            ResearchInsight(
+                insight=insight.get("insight", ""),
+                topic=insight.get("topic", ""),
+                context=insight.get("context", {}),
+                relevance_score=insight.get("relevance_score", 0.0),
+                added_date=insight.get("added_date", "")
+            )
+            for insight in insights_data
+        ]
+        
+        return {
+            "insights": insights,
+            "total_insights": len(insights),
+            "topic": topic
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving research insights: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge/summary/{topic}")
+def get_knowledge_summary(topic: str):
+    """Get a comprehensive knowledge summary for a topic"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        summary_data = kg_manager.get_knowledge_summary(topic)
+        
+        if "error" in summary_data:
+            raise HTTPException(status_code=500, detail=summary_data["error"])
+        
+        # Convert papers to Pydantic models
+        papers = [
+            ResearchPaper(
+                title=paper.get("title", ""),
+                authors=paper.get("authors", []),
+                arxiv_id=paper.get("arxiv_id", ""),
+                categories=paper.get("categories", []),
+                relevance_score=paper.get("relevance_score", 0.0),
+                content=paper.get("content", ""),
+                source=paper.get("source", "unknown")
+            )
+            for paper in summary_data.get("related_papers", [])
+        ]
+        
+        # Convert insights to Pydantic models
+        insights = [
+            ResearchInsight(
+                insight=insight.get("insight", ""),
+                topic=insight.get("topic", ""),
+                context=insight.get("context", {}),
+                relevance_score=insight.get("relevance_score", 0.0),
+                added_date=insight.get("added_date", "")
+            )
+            for insight in summary_data.get("research_insights", [])
+        ]
+        
+        # Convert general knowledge to Pydantic models
+        general_knowledge = [
+            KnowledgeSearchResult(
+                content=item.get("content", ""),
+                metadata=item.get("metadata", {}),
+                relevance_score=item.get("relevance_score", 0.0),
+                id=item.get("id", "")
+            )
+            for item in summary_data.get("general_knowledge", [])
+        ]
+        
+        summary = KnowledgeSummary(
+            topic=summary_data.get("topic", topic),
+            related_papers=papers,
+            research_insights=insights,
+            general_knowledge=general_knowledge,
+            total_papers=summary_data.get("total_papers", len(papers)),
+            total_insights=summary_data.get("total_insights", len(insights)),
+            total_knowledge_items=summary_data.get("total_knowledge_items", len(general_knowledge))
+        )
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge/memories")
+def get_all_memories(limit: int = 50):
+    """Get all memories from the knowledge store"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        memories = kg_manager.get_all_memories(limit=limit)
+        
+        return {
+            "memories": memories,
+            "total_memories": len(memories),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving all memories: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/knowledge/memory/{memory_id}")
+def delete_memory(memory_id: str):
+    """Delete a specific memory from the knowledge store"""
+    try:
+        kg_manager = get_knowledge_graph_manager()
+        success = kg_manager.delete_memory(memory_id)
+        
+        if success:
+            return {"message": f"Memory {memory_id} deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Memory not found or could not be deleted")
+            
+    except Exception as e:
+        logger.error(f"Error deleting memory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

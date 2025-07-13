@@ -3,9 +3,53 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
     const statusIndicator = document.getElementById('status-indicator');
+    const endpointSelect = document.getElementById('endpoint-select');
+    const endpointParams = document.getElementById('endpoint-params');
+    const userIdInput = document.getElementById('user-id-input');
+    const limitInput = document.getElementById('limit-input');
     
     // Add welcome message
-    addMessageToChat("Hello! I'm your research assistant. I can help you find and analyze academic papers, query knowledge, and answer questions. What would you like to explore today?", 'bot-message');
+    addMessageToChat("Hello! I'm your research assistant. I can help you find and analyze academic papers, query knowledge, and answer questions. Select an endpoint and try it out!", 'bot-message');
+    
+    // Handle endpoint selection
+    endpointSelect.addEventListener('change', function() {
+        const selectedEndpoint = endpointSelect.value;
+        updateUIForEndpoint(selectedEndpoint);
+    });
+    
+    // Update UI based on selected endpoint
+    function updateUIForEndpoint(endpoint) {
+        if (endpoint === 'agent') {
+            endpointParams.style.display = 'none';
+            messageInput.placeholder = "Ask me about research papers, topics, or general questions...";
+        } else if (endpoint === 'knowledge/search') {
+            endpointParams.style.display = 'flex';
+            messageInput.placeholder = "Enter your search query (e.g., 'machine learning')";
+        } else if (endpoint === 'knowledge/papers') {
+            endpointParams.style.display = 'flex';
+            messageInput.placeholder = "Enter topic for research papers (e.g., 'neural networks')";
+        } else if (endpoint === 'knowledge/insights') {
+            endpointParams.style.display = 'flex';
+            messageInput.placeholder = "Enter topic for research insights (e.g., 'deep learning')";
+        } else if (endpoint === 'knowledge/summary') {
+            endpointParams.style.display = 'flex';
+            limitInput.style.display = 'none';
+            limitInput.previousElementSibling.style.display = 'none'; // Hide limit label
+            messageInput.placeholder = "Enter topic for knowledge summary (e.g., 'artificial intelligence')";
+        } else if (endpoint === 'knowledge/memories') {
+            endpointParams.style.display = 'flex';
+            messageInput.placeholder = "Press Send to get all memories (input field ignored)";
+        }
+        
+        // Show/hide limit input based on endpoint
+        if (endpoint === 'knowledge/summary') {
+            limitInput.style.display = 'none';
+            limitInput.previousElementSibling.style.display = 'none';
+        } else if (endpoint !== 'agent') {
+            limitInput.style.display = 'inline-block';
+            limitInput.previousElementSibling.style.display = 'inline';
+        }
+    }
     
     // Generate or retrieve conversation hash
     function getConversationHash() {
@@ -60,31 +104,47 @@ document.addEventListener('DOMContentLoaded', function() {
         if (progressStep) progressStep.textContent = `Step ${step} of ${totalSteps}`;
     }
     
-    // Send message with streaming
+    // Send message with streaming or direct API calls
     function sendMessage() {
         const message = messageInput.value.trim();
         const requestTimestamp = new Date().toISOString();
         const conversationHash = getConversationHash();
+        const selectedEndpoint = endpointSelect.value;
         
-        if (!message) {
+        // For agent endpoint, require message. For memories endpoint, message is optional
+        if (!message && selectedEndpoint !== 'knowledge/memories') {
             return;
         }
         
-        // Add user message to chat
-        addMessageToChat(message, 'user-message');
+        // Add user message to chat (unless it's memories endpoint with no message)
+        if (message || selectedEndpoint !== 'knowledge/memories') {
+            addMessageToChat(message || 'Getting all memories...', 'user-message');
+        }
         messageInput.value = '';
         
         // Disable send button during processing
         sendBtn.disabled = true;
         sendBtn.textContent = 'Processing...';
         
+        const startTime = Date.now();
+        showStatus('Processing your request...', false);
+        
+        // Route to appropriate endpoint
+        if (selectedEndpoint === 'agent') {
+            // Use existing streaming logic for agent
+            sendToAgentStream(message, conversationHash, requestTimestamp, startTime);
+        } else {
+            // Use direct API calls for knowledge endpoints
+            sendToKnowledgeEndpoint(selectedEndpoint, message, startTime);
+        }
+    }
+    
+    // Send to agent with streaming
+    function sendToAgentStream(message, conversationHash, requestTimestamp, startTime) {
         // Add progress indicator
         const progressIndicator = createProgressIndicator();
         chatMessages.appendChild(progressIndicator);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        const startTime = Date.now();
-        showStatus('Processing your request...', false);
         
         // Use streaming endpoint
         fetch('/api/chat/stream', {
@@ -388,6 +448,191 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = false;
             sendBtn.textContent = 'Send';
         });
+    }
+    
+    // Send to knowledge endpoints
+    function sendToKnowledgeEndpoint(endpoint, message, startTime) {
+        const userId = userIdInput.value.trim() || 'demo_user';
+        const limit = parseInt(limitInput.value) || 10;
+        
+        let url, method, body = null, params = new URLSearchParams();
+        
+        // Build URL and parameters based on endpoint
+        switch (endpoint) {
+            case 'knowledge/search':
+                url = '/api/knowledge/search';
+                method = 'POST';
+                body = JSON.stringify({
+                    query: message,
+                    limit: limit,
+                });
+                break;
+                
+            case 'knowledge/papers':
+                url = `/api/knowledge/papers/${encodeURIComponent(message)}`;
+                method = 'GET';
+                params.append('limit', limit);
+                break;
+                
+            case 'knowledge/insights':
+                url = `/api/knowledge/insights/${encodeURIComponent(message)}`;
+                method = 'GET';
+                params.append('limit', limit);
+                break;
+                
+            case 'knowledge/summary':
+                url = `/api/knowledge/summary/${encodeURIComponent(message)}`;
+                method = 'GET';
+                break;
+                
+            case 'knowledge/memories':
+                url = '/api/knowledge/memories';
+                method = 'GET';
+                params.append('limit', limit);
+                break;
+                
+            default:
+                console.error('Unknown endpoint:', endpoint);
+                return;
+        }
+        
+        // Add query parameters for GET requests
+        if (method === 'GET' && params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        // Make the request
+        const fetchOptions = {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        };
+        
+        if (body) {
+            fetchOptions.body = body;
+        }
+        
+        fetch(url, fetchOptions)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Format and display the response
+                const formattedResponse = formatKnowledgeResponse(endpoint, data);
+                addMessageToChat(formattedResponse, 'bot-message');
+                
+                const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+                showStatus(`Completed in ${duration}s`, false);
+                
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+            })
+            .catch(error => {
+                console.error('Knowledge endpoint error:', error);
+                addMessageToChat(`Error: ${error.message}`, 'bot-message error-message');
+                showStatus('Error processing request', true);
+                
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+            });
+    }
+    
+    // Format knowledge endpoint responses
+    function formatKnowledgeResponse(endpoint, data) {
+        switch (endpoint) {
+            case 'knowledge/search':
+                if (data.results && data.results.length > 0) {
+                    let response = `## Search Results (${data.total_results} found)\n\n`;
+                    data.results.forEach((result, index) => {
+                        response += `### Result ${index + 1} (Score: ${result.relevance_score.toFixed(2)})\n`;
+                        response += `${result.content}\n\n`;
+                        if (result.metadata.type) {
+                            response += `*Type: ${result.metadata.type}*\n\n`;
+                        }
+                    });
+                    return response;
+                } else {
+                    return 'No search results found.';
+                }
+                
+            case 'knowledge/papers':
+                if (data.papers && data.papers.length > 0) {
+                    let response = `## Research Papers (${data.total_papers} found)\n\n`;
+                    data.papers.forEach((paper, index) => {
+                        response += `### ${index + 1}. ${paper.title}\n`;
+                        response += `**Authors:** ${paper.authors.join(', ')}\n`;
+                        response += `**ArXiv ID:** ${paper.arxiv_id}\n`;
+                        response += `**Categories:** ${paper.categories.join(', ')}\n`;
+                        response += `**Source:** ${paper.source}\n`;
+                        response += `**Score:** ${paper.relevance_score.toFixed(2)}\n\n`;
+                        response += `${paper.content.substring(0, 200)}...\n\n`;
+                    });
+                    return response;
+                } else {
+                    return 'No research papers found.';
+                }
+                
+            case 'knowledge/insights':
+                if (data.insights && data.insights.length > 0) {
+                    let response = `## Research Insights (${data.total_insights} found)\n\n`;
+                    data.insights.forEach((insight, index) => {
+                        response += `### Insight ${index + 1} - ${insight.topic}\n`;
+                        response += `${insight.insight}\n`;
+                        response += `*Added: ${insight.added_date}*\n`;
+                        response += `*Score: ${insight.relevance_score.toFixed(2)}*\n\n`;
+                    });
+                    return response;
+                } else {
+                    return 'No research insights found.';
+                }
+                
+            case 'knowledge/summary':
+                let response = `## Knowledge Summary: ${data.topic}\n\n`;
+                response += `**Total Papers:** ${data.total_papers}\n`;
+                response += `**Total Insights:** ${data.total_insights}\n`;
+                response += `**Total Knowledge Items:** ${data.total_knowledge_items}\n\n`;
+                
+                if (data.related_papers.length > 0) {
+                    response += `### Related Papers\n`;
+                    data.related_papers.forEach((paper, index) => {
+                        response += `${index + 1}. **${paper.title}** by ${paper.authors.join(', ')}\n`;
+                    });
+                    response += '\n';
+                }
+                
+                if (data.research_insights.length > 0) {
+                    response += `### Research Insights\n`;
+                    data.research_insights.forEach((insight, index) => {
+                        response += `${index + 1}. ${insight.insight.substring(0, 100)}...\n`;
+                    });
+                    response += '\n';
+                }
+                
+                return response;
+                
+            case 'knowledge/memories':
+                if (data.memories && data.memories.length > 0) {
+                    let response = `## All Memories (${data.total_memories} found)\n\n`;
+                    data.memories.forEach((memory, index) => {
+                        response += `### Memory ${index + 1}\n`;
+                        response += `${memory.content}\n`;
+                        if (memory.metadata.type) {
+                            response += `*Type: ${memory.metadata.type}*\n`;
+                        }
+                        response += `*Created: ${memory.created_at}*\n\n`;
+                    });
+                    return response;
+                } else {
+                    return 'No memories found.';
+                }
+                
+            default:
+                return JSON.stringify(data, null, 2);
+        }
     }
     
     // Simple markdown formatter

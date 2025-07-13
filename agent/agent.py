@@ -19,25 +19,11 @@ tracer = trace.get_tracer(PROJECT_NAME)
 
 load_dotenv()
 
-def setup_client():
-    # For the template, we're using OpenAI, but you can use any LLM provider or agentic framework
-    from openai import OpenAI
-    logger.info(f"Setting up OpenAI with endpoint: {os.getenv('OPENAI_MODEL', 'gpt-4o-mini')}")
-    return OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY")
-    )
-
 class Agent:
 
-    def __init__(self, cache: LRUCache):
-        self.client = setup_client()
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
-        self.prompts = Prompts()
-        self.cache = cache
-        self.langgraph_agent = LangGraphResearchAgent(tracer)
-        self.request_params = {
-            "temperature": float(os.getenv("OPENAI_TEMPERATURE", 0.1)),
-        }
+    def __init__(self):
+        self.langgraph_agent = LangGraphResearchAgent()
+        self.cache = LRUCache()
 
     @tracer.start_as_current_span(
         name=AGENT_NAME, attributes={SpanAttributes.OPENINFERENCE_SPAN_KIND: SPAN_TYPE}

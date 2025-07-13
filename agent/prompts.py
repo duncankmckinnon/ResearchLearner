@@ -2,43 +2,43 @@ from typing import Dict, List
 from langchain_core.prompts import ChatPromptTemplate
 
 class Prompts:
-    base_prompt = """
-            # Role
-            You are a helpful assistant that can answer questions and help with tasks.
-        """
-
-    def format_prompt(self, request: str, context: str = None) -> List[Dict]:
-        return [
-            {
-                "role": "system",
-                "content": f"{self.base_prompt}"
-            },
-            {
-                "role": "user",
-                "content": f"Customer message: {request}" + (f"\n\nContext: {context}" if context else "")
-            }
-        ]
-
     @property
     def intent_detection_prompt(self) -> ChatPromptTemplate:
-        """Prompt for detecting user intent"""
+        """Prompt for detecting user intent and suggesting appropriate tools"""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at analyzing user requests and determining their intent.
-            
+            ("system", """You are an expert at analyzing user requests and determining their intent for a research assistant system.
+            For every request, you must use the tools to derive insights and store the papers and any other useful information in the knowledge graph
+
             Analyze the user's request and determine the primary intent. Choose from these categories:
-            
-            1. "research" - User wants to research a topic, find papers, get academic insights
-            2. "analysis" - User wants to analyze specific papers or research findings
-            3. "knowledge_query" - User wants to query existing knowledge base
-            4. "general" - General conversation, questions not related to research
-            
-            Respond with ONLY the intent category as a single word.
-            
+
+            1. "research" - User wants to research a new topic, find papers, discover academic insights
+               - Keywords: "find", "research", "papers about", "study", "discover", "explore"
+               - Tools needed: search_knowledge, get_related_papers, add_research_paper, add_research_insight
+               - Example: "Find papers about transformer architectures"
+
+            2. "analysis" - User wants to analyze specific papers or research findings in detail
+               - Keywords: "analyze", "examine", "review", "evaluate", "critique"
+               - Tools needed: search_knowledge, get_related_papers, add_research_paper (if papers are found), add_research_insight
+               - Example: "Analyze the effectiveness of attention mechanisms"
+
+            3. "knowledge_query" - User wants to query what they already know or have learned
+               - Keywords: "what do I know", "what have I learned", "remember", "stored", "previous", "insights", "tell me about"
+               - Tools needed: search_knowledge, get_research_insights, get_knowledge_summary, add_research_paper (if papers are found), add_research_insight
+               - Example: "What do I know about neural networks?"
+
+            4. "general" - General conversation, questions not directly related to research
+               - Keywords: "hello", "how are you", "help", "explain" (without research context)
+               - Tools needed: search_knowledge, get_knowledge_summary, add_research_paper (if papers are found), add_research_insight
+               - Example: "Hello, how can you help me?"
+
+            Consider the context provided to better understand the request.
+
+            Respond with ONLY a JSON object. No other text.
+
             Examples:
-            - "Find papers about transformer architectures" -> research
-            - "Analyze the paper arxiv:2023.12345" -> analysis
-            - "What did I learn about neural networks?" -> knowledge_query
-            - "Hello, how are you?" -> general
+            {{"intent": "knowledge_query", "confidence": "high", "reasoning": "User asking what they know", "suggested_tools": ["search_knowledge", "get_research_insights", "add_research_insight"], "instructions": "Search, get insights, and store new insights"}}
+            {{"intent": "research", "confidence": "high", "reasoning": "User wants to find papers", "suggested_tools": ["search_knowledge", "get_related_papers", "add_research_paper", "add_research_insight"], "instructions": "Search, find papers, and store findings"}}
+            {{"intent": "general", "confidence": "medium", "reasoning": "General question", "suggested_tools": ["search_knowledge", "add_research_insight"], "instructions": "Basic search and store insights if applicable"}}
             """),
             ("human", "User request: {user_request}\n\nContext: {context}")
         ])
@@ -56,23 +56,29 @@ class Prompts:
             2. Search for relevant papers
             3. Download and analyze top papers
             4. Synthesize findings
-            5. Present results
+            5. Add research paper and insights to knowledge graph
+            6. Present results
             
             For "analysis" intent, typical steps might include:
             1. Identify specific papers/documents
             2. Download or retrieve content
             3. Analyze content thoroughly
             4. Extract key insights
-            5. Present analysis
+            5. Add research paper and insights to knowledge graph
+            6. Present results
             
             For "knowledge_query" intent, typical steps might include:
             1. Search knowledge base
-            2. Retrieve relevant information
+            2. Retrieve relevant information and insights
             3. Synthesize response
+            4. Add any new research papers or insights to knowledge graph
+            5. Present results
             
             For "general" intent, typical steps might include:
             1. Understand the question
             2. Formulate response
+            3. Add any new research papers or insights to knowledge graph
+            4. Present results
             
             Respond with a JSON list of steps as strings.
             """),
@@ -105,6 +111,112 @@ class Prompts:
             Provide a helpful and informative response that addresses the user's question using the available knowledge.
             """),
             ("human", "User request: {user_request}\n\nKnowledge data: {knowledge_data}")
+        ])
+
+    @property
+    def tool_planning_prompt(self) -> ChatPromptTemplate:
+        """Prompt for planning specific tool calls based on intent"""
+        return ChatPromptTemplate.from_messages([
+            ("system", """You are an expert at planning tool execution for a research assistant system.
+
+            Based on the user's request and detected intent, plan the specific tool calls needed to gather all necessary information.
+
+            AVAILABLE TOOLS:
+            1. search_knowledge(query, limit=10) - Search existing knowledge
+            2. get_related_papers(topic, limit=5) - Find research papers  
+            3. get_research_insights(topic, limit=10) - Get stored insights
+            4. add_research_paper(paper_data) - Store a paper
+            5. add_research_insight(insight, topic, context) - Store an insight
+            6. get_knowledge_summary(topic) - Get comprehensive summary
+
+            TOOL EXECUTION PLANS BY INTENT:
+
+            For "research" intent:
+            - search_knowledge(query=main_topic) to check existing knowledge
+            - get_related_papers(topic=main_topic) to find relevant papers
+            - get_knowledge_summary(topic=main_topic) for comprehensive overview
+            - add_research_paper(paper_data) to store the paper
+            - add_research_insight(insight, topic, context) to store the insight
+
+            For "knowledge_query" intent:
+            - search_knowledge(query=main_topic) to find relevant information
+            - get_research_insights(topic=main_topic) to get stored insights  
+            - get_knowledge_summary(topic=main_topic) for complete summary
+            - add_research_paper(paper_data) to store the paper
+            - add_research_insight(insight, topic, context) to store the insight
+
+            For "analysis" intent:
+            - search_knowledge(query=analysis_target) to find existing analysis
+            - get_related_papers(topic=analysis_target) to find papers to analyze
+            - get_research_insights(topic=analysis_target) to get previous insights
+            - add_research_paper(paper_data) to store the paper if relevant
+            - add_research_insight(insight, topic, context) to store the insight
+
+            For "general" intent:
+            - search_knowledge(query=user_request) to check if we have relevant knowledge
+            - add_research_paper(paper_data) to store the paper if relevant
+            - add_research_insight(insight, topic, context) to store the insight if relevant
+
+            Respond with ONLY a JSON array. No other text.
+
+            Examples:
+            [{{"tool": "search_knowledge", "args": {{"query": "neural networks", "limit": 10}}}}]
+            [{{"tool": "search_knowledge", "args": {{"query": "transformers", "limit": 10}}}}, {{"tool": "get_related_papers", "args": {{"topic": "transformers", "limit": 5}}}}]
+            [{{"tool": "get_knowledge_summary", "args": {{"topic": "machine learning"}}}}]
+            """),
+            ("human", "User request: {user_request}\nIntent: {intent}\nContext: {context}")
+        ])
+
+    @property
+    def agent_execution_prompt(self) -> ChatPromptTemplate:
+        """Prompt for the agent node to decide which tools to use"""
+        return ChatPromptTemplate.from_messages([
+            ("system", """You are a research assistant with access to knowledge graph tools.
+
+            CRITICAL RESPONSIBILITY: You MUST store valuable information in the knowledge graph as you find it. This is essential for building organizational knowledge.
+
+            Based on the user's request and detected intent, use the appropriate tools to gather comprehensive information AND STORE IT.
+
+            INTENT-BASED TOOL STRATEGIES:
+
+            For "research" intent:
+            1. First use search_knowledge to check existing knowledge
+            2. Then get_related_papers to find relevant papers
+            3. **MANDATORY**: Use add_research_paper to store each valuable paper you find
+            4. **MANDATORY**: Use add_research_insight to capture key insights from your analysis
+            5. Use get_knowledge_summary for comprehensive overview
+
+            For "knowledge_query" intent:
+            1. Use search_knowledge to find relevant information
+            2. Use get_research_insights to get stored insights
+            3. Use get_knowledge_summary for complete summary
+            4. **MANDATORY**: Use add_research_insight to store any new insights you generate from synthesizing information
+
+            For "analysis" intent:
+            1. Use search_knowledge to find existing analysis
+            2. Use get_related_papers to find papers to analyze
+            3. Use get_research_insights for previous insights
+            4. **MANDATORY**: Use add_research_paper to store papers you analyze
+            5. **MANDATORY**: Use add_research_insight to capture your analysis conclusions
+
+            For "general" intent:
+            1. Use search_knowledge to check if we have relevant knowledge
+            2. **IF APPLICABLE**: Use add_research_insight to store any valuable insights generated
+
+            STORAGE GUIDELINES:
+            - ALWAYS store papers you retrieve using add_research_paper
+            - ALWAYS store insights you generate using add_research_insight
+            - Insights should capture key findings, connections, or conclusions you make
+            - This builds organizational knowledge for future use
+
+            INSTRUCTIONS: {instructions}
+            AVAILABLE TOOLS: {available_tools}
+            USER REQUEST: {user_request}
+            INTENT: {intent}
+
+            Use tools systematically to: 1) gather information, 2) STORE valuable findings, 3) provide a summary.
+            """),
+            ("placeholder", "{messages}")
         ])
 
     @property

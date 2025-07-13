@@ -152,10 +152,71 @@
 
         .input-area {
             display: flex;
+            flex-direction: column;
             padding: 20px;
             border-top: 1px solid #e0e0e0;
             background-color: #ffffff;
+            gap: 15px;
+        }
+
+        .input-controls {
+            display: flex;
             gap: 10px;
+            align-items: center;
+        }
+
+        .endpoint-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .endpoint-selector label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #667eea;
+        }
+
+        .endpoint-selector select {
+            padding: 10px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            background-color: white;
+            color: #333;
+            outline: none;
+            transition: border-color 0.3s ease;
+            min-width: 200px;
+        }
+
+        .endpoint-selector select:focus {
+            border-color: #667eea;
+        }
+
+        .endpoint-params {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .param-input {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.3s ease;
+            width: 120px;
+        }
+
+        .param-input:focus {
+            border-color: #667eea;
+        }
+
+        .param-label {
+            font-size: 12px;
+            color: #666;
         }
 
         .input-area input {
@@ -358,8 +419,29 @@
             <div id="chat-messages" class="chat-messages"></div>
             
             <div class="input-area">
-                <input type="text" id="message-input" placeholder="Ask me about research papers, topics, or general questions...">
-                <button id="send-btn">Send</button>
+                <div class="endpoint-selector">
+                    <label for="endpoint-select">Select Endpoint:</label>
+                    <select id="endpoint-select">
+                        <option value="agent">Main Agent (Chat)</option>
+                        <option value="knowledge/search">Knowledge Search</option>
+                        <option value="knowledge/papers">Research Papers</option>
+                        <option value="knowledge/insights">Research Insights</option>
+                        <option value="knowledge/summary">Knowledge Summary</option>
+                        <option value="knowledge/memories">All Memories</option>
+                    </select>
+                </div>
+                
+                <div id="endpoint-params" class="endpoint-params" style="display: none;">
+                    <span class="param-label">User ID:</span>
+                    <input type="text" id="user-id-input" class="param-input" value="demo_user" placeholder="User ID">
+                    <span class="param-label">Limit:</span>
+                    <input type="number" id="limit-input" class="param-input" value="10" placeholder="Limit" min="1" max="50">
+                </div>
+                
+                <div class="input-controls">
+                    <input type="text" id="message-input" placeholder="Ask me about research papers, topics, or general questions...">
+                    <button id="send-btn">Send</button>
+                </div>
             </div>
         </div>
     </div>

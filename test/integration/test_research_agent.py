@@ -5,6 +5,10 @@ Test script for the research agent with ArXiv MCP server integration
 
 import asyncio
 import logging
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from agent.langgraph_agent import LangGraphResearchAgent
 from opentelemetry import trace
 from agent.constants import PROJECT_NAME

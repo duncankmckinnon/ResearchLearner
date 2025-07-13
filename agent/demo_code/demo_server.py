@@ -156,6 +156,130 @@ def clear_cache():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Knowledge Store API Proxy Endpoints
+
+@app.route('/api/knowledge/search', methods=['POST'])
+def search_knowledge():
+    """Proxy for knowledge search endpoint"""
+    try:
+        data = request.json
+        logger.info(f"Proxying knowledge search request: {data.get('query', '')}")
+        
+        response = requests.post(
+            f"{FASTAPI_URL}/knowledge/search",
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"Knowledge search returned error status: {response.status_code}")
+            return jsonify({"error": "Knowledge search failed"}), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error in knowledge search proxy: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/knowledge/papers/<path:topic>')
+def get_related_papers(topic):
+    """Proxy for related papers endpoint"""
+    try:
+        params = {
+            'limit': request.args.get('limit', 5),
+        }
+        logger.info(f"Proxying papers request for topic: {topic}")
+        
+        response = requests.get(
+            f"{FASTAPI_URL}/knowledge/papers/{topic}",
+            params=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"Papers endpoint returned error status: {response.status_code}")
+            return jsonify({"error": "Papers lookup failed"}), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error in papers proxy: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/knowledge/insights/<path:topic>')
+def get_research_insights(topic):
+    """Proxy for research insights endpoint"""
+    try:
+        params = {
+            'limit': request.args.get('limit', 10),
+        }
+        logger.info(f"Proxying insights request for topic: {topic}")
+        
+        response = requests.get(
+            f"{FASTAPI_URL}/knowledge/insights/{topic}",
+            params=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"Insights endpoint returned error status: {response.status_code}")
+            return jsonify({"error": "Insights lookup failed"}), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error in insights proxy: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/knowledge/summary/<path:topic>')
+def get_knowledge_summary(topic):
+    """Proxy for knowledge summary endpoint"""
+    try:
+        params = {
+        }
+        logger.info(f"Proxying summary request for topic: {topic}")
+        
+        response = requests.get(
+            f"{FASTAPI_URL}/knowledge/summary/{topic}",
+            params=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"Summary endpoint returned error status: {response.status_code}")
+            return jsonify({"error": "Summary lookup failed"}), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error in summary proxy: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/knowledge/memories')
+def get_all_memories():
+    """Proxy for all memories endpoint"""
+    try:
+        params = {
+            'limit': request.args.get('limit', 50),
+        }
+        logger.info(f"Proxying memories request")
+        
+        response = requests.get(
+            f"{FASTAPI_URL}/knowledge/memories",
+            params=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            logger.error(f"Memories endpoint returned error status: {response.status_code}")
+            return jsonify({"error": "Memories lookup failed"}), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error in memories proxy: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     logger.info("Starting Flask server with streaming support...")
     app.run(debug=True, load_dotenv=True, port=8080, host='0.0.0.0') 
