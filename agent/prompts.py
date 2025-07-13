@@ -213,8 +213,8 @@ class Prompts:
             - This builds organizational knowledge for future use
 
             CORRECT FORMAT EXAMPLES:
-            add_research_paper(paper_data={"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."})
-            add_research_insight(insight="Key finding about X", topic="research topic", context={"source": "paper analysis"})
+            add_research_paper(paper_data={{"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."}})
+            add_research_insight(insight="Key finding about X", topic="research topic", context={{"source": "paper analysis"}})
 
             INSTRUCTIONS: {instructions}
             AVAILABLE TOOLS: {available_tools}
