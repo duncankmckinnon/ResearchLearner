@@ -125,7 +125,7 @@ class Prompts:
             1. search_knowledge(query, limit=10) - Search existing knowledge
             2. get_related_papers(topic, limit=5) - Find research papers  
             3. get_research_insights(topic, limit=10) - Get stored insights
-            4. add_research_paper(paper_data) - Store a paper
+            4. add_research_paper(paper_data) - Store a paper (paper_data must be a complete dict)
             5. add_research_insight(insight, topic, context) - Store an insight
             6. get_knowledge_summary(topic) - Get comprehensive summary
 
@@ -135,33 +135,34 @@ class Prompts:
             - search_knowledge(query=main_topic) to check existing knowledge
             - get_related_papers(topic=main_topic) to find relevant papers
             - get_knowledge_summary(topic=main_topic) for comprehensive overview
-            - add_research_paper(paper_data) to store the paper
+            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
             - add_research_insight(insight, topic, context) to store the insight
 
             For "knowledge_query" intent:
             - search_knowledge(query=main_topic) to find relevant information
             - get_research_insights(topic=main_topic) to get stored insights  
             - get_knowledge_summary(topic=main_topic) for complete summary
-            - add_research_paper(paper_data) to store the paper
+            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
             - add_research_insight(insight, topic, context) to store the insight
 
             For "analysis" intent:
             - search_knowledge(query=analysis_target) to find existing analysis
             - get_related_papers(topic=analysis_target) to find papers to analyze
             - get_research_insights(topic=analysis_target) to get previous insights
-            - add_research_paper(paper_data) to store the paper if relevant
+            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
             - add_research_insight(insight, topic, context) to store the insight
 
             For "general" intent:
             - search_knowledge(query=user_request) to check if we have relevant knowledge
-            - add_research_paper(paper_data) to store the paper if relevant
-            - add_research_insight(insight, topic, context) to store the insight if relevant
+            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
+            - add_research_insight(insight, topic, context) to store the insight
 
             Respond with ONLY a JSON array. No other text.
 
             Examples:
             [{{"tool": "search_knowledge", "args": {{"query": "neural networks", "limit": 10}}}}]
             [{{"tool": "search_knowledge", "args": {{"query": "transformers", "limit": 10}}}}, {{"tool": "get_related_papers", "args": {{"topic": "transformers", "limit": 5}}}}]
+            [{{"tool": "add_research_paper", "args": {{"paper_data": {{"title": "Paper Title", "authors": ["Author1"], "arxiv_id": "1234.5678", "categories": ["cs.AI"], "content": "Abstract text"}}}}}}]
             [{{"tool": "get_knowledge_summary", "args": {{"topic": "machine learning"}}}}]
             """),
             ("human", "User request: {user_request}\nIntent: {intent}\nContext: {context}")
@@ -204,10 +205,16 @@ class Prompts:
             2. **IF APPLICABLE**: Use add_research_insight to store any valuable insights generated
 
             STORAGE GUIDELINES:
-            - ALWAYS store papers you retrieve using add_research_paper
+            - ALWAYS store papers you retrieve using add_research_paper (paper_data must be a complete dict)
             - ALWAYS store insights you generate using add_research_insight
+            - When calling add_research_paper, wrap the complete paper dictionary in "paper_data" parameter
+            - Paper data should include: title, authors, arxiv_id, categories, content/abstract
             - Insights should capture key findings, connections, or conclusions you make
             - This builds organizational knowledge for future use
+
+            CORRECT FORMAT EXAMPLES:
+            add_research_paper(paper_data={"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."})
+            add_research_insight(insight="Key finding about X", topic="research topic", context={"source": "paper analysis"})
 
             INSTRUCTIONS: {instructions}
             AVAILABLE TOOLS: {available_tools}
