@@ -2,6 +2,9 @@
 
 An AI-powered research assistant that can find, analyze, and synthesize academic papers, build knowledge over time, and provide intelligent insights. This agent uses LangGraph for workflow orchestration, arXiv for paper discovery, and Mem0 for persistent knowledge management.
 
+<img width="747" height="594" alt="image" src="https://github.com/user-attachments/assets/d0e552fe-d123-429f-8c88-6b0a85c72fe3" />
+
+
 ## Features
 
 ### 🔬 **Research Capabilities**
@@ -32,6 +35,9 @@ An AI-powered research assistant that can find, analyze, and synthesize academic
 - **Phoenix Integration**: Full tracing and monitoring of agent workflows
 - **Request Tracking**: Monitor performance and debug issues
 - **OpenTelemetry**: Comprehensive observability for all components
+
+<img width="1501" height="913" alt="image" src="https://github.com/user-attachments/assets/ff35c324-2933-419b-b2c5-7f44ca96a8ff" />
+
 
 ## Architecture
 
