@@ -21,7 +21,7 @@ class SimpleArxivClient:
         os.makedirs(self.storage_path, exist_ok=True)
         
     async def search_papers(self, query: str, max_results: int = 10, 
-                          date_from: str = None, categories: List[str] = None) -> ArxivResult:
+                          date_from: Optional[str] = None, categories: Optional[List[str]] = None) -> ArxivResult:
         """Search for papers on ArXiv"""
         try:
             import arxiv
@@ -31,7 +31,7 @@ class SimpleArxivClient:
             if categories:
                 # Add category filters
                 category_filter = " OR ".join([f"cat:{cat}" for cat in categories])
-                search_query = f"({query}) AND ({category_filter})"
+                search_query = f"({query}) AND ({category_filter}) {f'AND publishedDate:[{date_from} TO *]' if date_from else ''}"
             
             # Create search
             search = arxiv.Search(

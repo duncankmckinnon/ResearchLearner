@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 import logging
 import os
 from datetime import datetime
@@ -128,7 +128,7 @@ class KnowledgeGraphManager:
             logger.error(f"Error adding research insight: {str(e)}")
             return False
     
-    def search_knowledge(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_knowledge(self, query: str, limit: Optional[int] = 10) -> List[Dict[str, Any]]:
         """Search the knowledge graph"""
         if not self.memory:
             logger.error("Memory not initialized")
@@ -136,7 +136,7 @@ class KnowledgeGraphManager:
         
         try:
             logger.info(f"Searching knowledge graph with query: {query}")
-            results = self.memory.search(query, user_id="default", limit=limit)
+            results = self.memory.search(query, user_id="default", limit=limit if limit else 10)
             
             # Format results for easier consumption
             formatted_results = []
@@ -165,7 +165,7 @@ class KnowledgeGraphManager:
             logger.error(f"Error searching knowledge graph: {str(e)}")
             return []
     
-    def get_related_papers(self, topic: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def get_related_papers(self, topic: str, limit: int = 5) -> Union[List[Optional[Dict[str, Any]]], None]:
         """Get papers related to a specific topic"""
         if not self.memory:
             return []
@@ -420,7 +420,7 @@ class KnowledgeGraphManager:
                 "related_papers": papers,
                 "research_insights": insights,
                 "general_knowledge": general_knowledge,
-                "total_papers": len(papers),
+                "total_papers": len(papers) if papers else 0,
                 "total_insights": len(insights),
                 "total_knowledge_items": len(general_knowledge)
             }

@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from agent.agent import Agent
 from phoenix.otel import register
-from openinference.instrumentation.openai import OpenAIInstrumentor
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from agent.schema import (
     RequestFormat, 
@@ -13,14 +12,11 @@ from agent.schema import (
     ResearchInsight, 
     KnowledgeSummary
 )
-from agent.caching import LRUCache
 from agent.constants import PROJECT_NAME
 from agent.knowledge_graph import get_knowledge_graph_manager
 import logging
 import json
-import asyncio
 import time
-from typing import Generator
 import uuid
 from datetime import datetime
 
@@ -47,11 +43,6 @@ active_processes = {}
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
-
-@app.get("/clear_cache")
-def clear_cache():
-    cache.clear()
-    return {"message": "Cache cleared"}
 
 @app.post("/agent", response_model=ResponseFormat)
 def process_request(request: RequestFormat):
@@ -244,6 +235,12 @@ def get_related_papers(topic: str, limit: int = 5):
         papers_data = kg_manager.get_related_papers(topic, limit=limit)
         
         # Convert to Pydantic models
+        if papers_data is None:
+            return {
+                "papers": [],
+                "total_papers": 0,
+                "topic": topic
+            }
         papers = [
             ResearchPaper(
                 title=paper.get("title", ""),
@@ -254,7 +251,7 @@ def get_related_papers(topic: str, limit: int = 5):
                 content=paper.get("content", ""),
                 source=paper.get("source", "unknown")
             )
-            for paper in papers_data
+            for paper in papers_data if paper
         ]
         
         return {
