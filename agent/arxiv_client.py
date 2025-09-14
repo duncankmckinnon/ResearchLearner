@@ -206,7 +206,7 @@ class SimpleResearchAgent:
             
             # Download top papers
             downloaded_papers = []
-            for paper in papers[:3]:  # Download top 3 papers
+            for paper in papers:  # Download all papers
                 paper_id = paper.get("id", "")
                 if paper_id:
                     download_result = await self.arxiv_client.download_paper(paper_id)

@@ -53,7 +53,7 @@ class Prompts:
             
             For "research" intent, typical steps might include:
             1. Extract research topic/keywords
-            2. Search for relevant papers
+            2. Search for relevant papers in knowledge graph and ArXiv
             3. Download and analyze top papers
             4. Synthesize findings
             5. Add research paper and insights to knowledge graph
@@ -61,14 +61,14 @@ class Prompts:
             
             For "analysis" intent, typical steps might include:
             1. Identify specific papers/documents
-            2. Download or retrieve content
+            2. Download or retrieve content in knowledge graph and ArXiv
             3. Analyze content thoroughly
             4. Extract key insights
             5. Add research paper and insights to knowledge graph
             6. Present results
             
             For "knowledge_query" intent, typical steps might include:
-            1. Search knowledge base
+            1. Search knowledge base 
             2. Retrieve relevant information and insights
             3. Synthesize response
             4. Add any new research papers or insights to knowledge graph
@@ -77,8 +77,9 @@ class Prompts:
             For "general" intent, typical steps might include:
             1. Understand the question
             2. Formulate response
-            3. Add any new research papers or insights to knowledge graph
-            4. Present results
+            3. Search knowledge graph and ArXiv
+            4. Add any new research papers or insights to knowledge graph
+            5. Present results
             
             Respond with a JSON list of steps as strings.
             """),
@@ -122,8 +123,8 @@ class Prompts:
             Based on the user's request and detected intent, plan the specific tool calls needed to gather all necessary information.
 
             AVAILABLE TOOLS:
-            1. search_knowledge(query, limit=10) - Search existing knowledge
-            2. get_related_papers(topic, limit=5) - Find research papers  
+            1. search_knowledge(query, limit=10) - Search and retrieve existing knowledge
+            2. get_related_papers(topic, limit=5) - Find new related research papers  
             3. get_research_insights(topic, limit=10) - Get stored insights
             4. add_research_paper(paper_data) - Store a paper (paper_data must be a complete dict)
             5. add_research_insight(insight, topic, context) - Store an insight

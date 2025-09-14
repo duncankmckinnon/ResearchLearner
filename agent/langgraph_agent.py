@@ -367,32 +367,32 @@ class LangGraphResearchAgent:
             
             # Create compilation prompt based on gathered information
             compilation_prompt = f"""
-Based on the user's request and the information gathered through {tool_call_count} tool execution rounds, provide a comprehensive response.
+            Based on the user's request and the information gathered through {tool_call_count} tool execution rounds, provide a comprehensive response.
 
-User request: {user_request}
-Intent: {intent}
-Tools used: {', '.join(tools_used) if tools_used else 'none'}
+            User request: {user_request}
+            Intent: {intent}
+            Tools used: {', '.join(tools_used) if tools_used else 'none'}
 
-Tool results gathered:
-"""
+            Tool results gathered:
+            """
             
             if tool_results:
                 for i, tool_result in enumerate(tool_results, 1):
                     tool_name = tool_result["tool"]
                     result = tool_result["result"]
-                    compilation_prompt += f"\n{i}. {tool_name}: {str(result)[:300]}...\n"
+                    compilation_prompt += f"\n{i}. {tool_name}: {str(result)}\n"
             else:
                 compilation_prompt += "\nNo tool results available from this session."
             
             compilation_prompt += """
 
-Based on the information gathered above, provide a clear, comprehensive response that:
-1. Directly addresses the user's request
-2. Synthesizes information from multiple sources when available
-3. Indicates what information was found vs. not found
-4. Provides actionable insights or next steps when appropriate
+        Based on the information gathered above, provide a clear, comprehensive response that:
+        1. Directly addresses the user's request
+        2. Synthesizes information from multiple sources when available
+        3. Indicates what information was found vs. not found
+        4. Provides actionable insights or next steps when appropriate
 
-Be conversational but informative."""
+        Be conversational but informative."""
             
             # Generate final response using the structured information
             response = self.base_llm.invoke([HumanMessage(content=compilation_prompt)])

@@ -5,7 +5,7 @@ Async tool wrappers for knowledge graph functions to be used by LangGraph agent
 import asyncio
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from agent.knowledge_graph import get_knowledge_graph_manager
@@ -41,6 +41,7 @@ class AddResearchInsightInput(BaseModel):
     """Input for adding a research insight"""
     insight: str = Field(description="The research insight content")
     topic: str = Field(description="Topic of the insight")
+    paper_ids: Optional[List[str]] = Field(default=None, description="IDs of the papers the insight is about")
     context: Dict[str, Any] = Field(default_factory=dict, description="Context information")
 
 
@@ -88,11 +89,11 @@ class GetRelatedPapersTool(BaseTool):
     description: str = "Get research papers related to a specific topic from knowledge graph and ArXiv"
     args_schema: type = GetRelatedPapersInput
 
-    def _run(self, topic: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def _run(self, topic: str, limit: int = 5) -> Union[List[Union[Dict[str, Any], None]], None]:
         """Synchronous version (fallback)"""
         return asyncio.run(self._arun(topic, limit))
 
-    async def _arun(self, topic: str, limit: int = 5) -> List[Dict[str, Any]]:
+    async def _arun(self, topic: str, limit: int = 5) -> Union[List[Union[Dict[str, Any], None]], None]:
         """Get related papers asynchronously"""
         try:
             logger.info(f"Executing get_related_papers tool: topic='{topic}', limit={limit}")
@@ -106,10 +107,13 @@ class GetRelatedPapersTool(BaseTool):
             
             results = await loop.run_in_executor(None, get_papers_sync)
             
-            
-            logger.info(f"get_related_papers tool completed: found {len(results)} papers")
-            return results
-            
+            if results:
+                logger.info(f"get_related_papers tool completed: found {len(results)} papers")
+                return results
+            else:
+                logger.warning(f"get_related_papers tool completed: found no papers for topic: {topic}")
+                return None
+
         except Exception as e:
             logger.error(f"Error in get_related_papers tool: {str(e)}")
             return []
@@ -186,11 +190,11 @@ class AddResearchInsightTool(BaseTool):
     description: str = "Add a research insight to the knowledge graph for future retrieval"
     args_schema: type = AddResearchInsightInput
 
-    def _run(self, insight: str, topic: str, context: Dict[str, Any] = None) -> bool:
+    def _run(self, insight: str, topic: str, paper_ids: Optional[List[str]] = None, context: Optional[Dict[str, Any]] = None) -> bool:
         """Synchronous version (fallback)"""
-        return asyncio.run(self._arun(insight, topic, context or {}))
+        return asyncio.run(self._arun(insight, topic, paper_ids or [], context or {}))
 
-    async def _arun(self, insight: str, topic: str, context: Dict[str, Any] = None) -> bool:
+    async def _arun(self, insight: str, topic: str, paper_ids: Optional[List[str]] = None, context: Optional[Dict[str, Any]] = None) -> bool:
         """Add research insight asynchronously"""
         try:
             logger.info(f"Executing add_research_insight tool: topic='{topic}'")
@@ -200,7 +204,7 @@ class AddResearchInsightTool(BaseTool):
             kg_manager = get_knowledge_graph_manager()
             
             def add_insight_sync():
-                return kg_manager.add_research_insight(insight, topic, context or {})
+                return kg_manager.add_research_insight(insight, topic, paper_ids or [], context or {})
             
             success = await loop.run_in_executor(None, add_insight_sync)
             

@@ -88,7 +88,7 @@ class KnowledgeGraphManager:
             logger.error(f"Error adding paper to knowledge graph: {str(e)}")
             return False
     
-    def add_research_insight(self, insight: str, topic: str, context: Dict[str, Any] = {}) -> bool:
+    def add_research_insight(self, insight: str, topic: str, paper_ids: Optional[List[str]] = None, context: Dict[str, Any] = {}) -> bool:
         """Add a research insight to the knowledge graph"""
         if not self.memory:
             logger.error("Memory not initialized")
@@ -102,12 +102,13 @@ class KnowledgeGraphManager:
             metadata = {
                 "type": "research_insight",
                 "topic": topic,
+                "paper_ids": paper_ids,
                 "added_date": datetime.now().isoformat()
             }
             
             # Add context as flat key-value pairs with string values only
             if context:
-                insight_text += f"\n\nContext: {json.dumps(context, indent=2)}"
+                insight_text += f"\n\nContext: {json.dumps(context, indent=2)}\n\nPaper IDs: {paper_ids}"
                 for key, value in context.items():
                     # Convert all values to strings for ChromaDB compatibility
                     safe_key = f"context_{key}"
@@ -137,7 +138,7 @@ class KnowledgeGraphManager:
         try:
             logger.info(f"Searching knowledge graph with query: {query}")
             results = self.memory.search(query, user_id="default", limit=limit if limit else 10)
-            
+            logger.info(f"Results: {results}")
             # Format results for easier consumption
             formatted_results = []
             for result in results:
