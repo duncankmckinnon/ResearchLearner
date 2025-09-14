@@ -95,14 +95,15 @@ class KnowledgeGraphManager:
             return False
         
         try:
-            # Format insight with context
-            insight_text = f"Research insight on {topic}: {insight}"
+            # Format insight in a way that mem0 will recognize as important facts
+            # Use declarative statements that mem0's personal information extractor will store
+            insight_text = f"User learned about {topic}: {insight}. This is important research knowledge about {topic}."
             
             # Flatten context into the metadata (ChromaDB only accepts simple types)
             metadata = {
                 "type": "research_insight",
                 "topic": topic,
-                "paper_ids": paper_ids,
+                "paper_ids": ", ".join(paper_ids) if paper_ids else "",
                 "added_date": datetime.now().isoformat()
             }
             
@@ -137,8 +138,12 @@ class KnowledgeGraphManager:
         
         try:
             logger.info(f"Searching knowledge graph with query: {query}")
-            results = self.memory.search(query, user_id="default", limit=limit if limit else 10)
-            logger.info(f"Results: {results}")
+            response = self.memory.search(query, user_id="default", limit=limit if limit else 10)
+            logger.info(f"Raw mem0 response: {response}")
+
+            # Extract results from mem0 response format
+            results = response.get("results", [])
+
             # Format results for easier consumption
             formatted_results = []
             for result in results:
