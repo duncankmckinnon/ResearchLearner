@@ -20,22 +20,49 @@ class KnowledgeGraphManager:
         try:
             from mem0 import Memory
             
-            config = {
-                "vector_store": {
-                    "provider": "chroma",
-                    "config": {
-                        "collection_name": "research_knowledge",
-                        "path": os.path.expanduser("~/.research_learner/knowledge_db")
-                    }
-                },
-                "llm": {
-                    "provider": "openai",
-                    "config": {
-                        "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
-                        "temperature": 0.1
+            # Check if we should use containerized ChromaDB or local
+            chroma_host = os.getenv("CHROMA_HOST")
+            chroma_port = os.getenv("CHROMA_PORT", "8000")
+
+            if chroma_host:
+                # Use containerized ChromaDB
+                config = {
+                    "vector_store": {
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": "research_knowledge",
+                            "host": chroma_host,
+                            "port": int(chroma_port)
+                        }
+                    },
+                    "llm": {
+                        "provider": "openai",
+                        "config": {
+                            "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+                            "temperature": 0.1
+                        }
                     }
                 }
-            }
+                logger.info(f"Using containerized ChromaDB at {chroma_host}:{chroma_port}")
+            else:
+                # Use local ChromaDB
+                config = {
+                    "vector_store": {
+                        "provider": "chroma",
+                        "config": {
+                            "collection_name": "research_knowledge",
+                            "path": os.path.expanduser("~/.research_learner/knowledge_db")
+                        }
+                    },
+                    "llm": {
+                        "provider": "openai",
+                        "config": {
+                            "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+                            "temperature": 0.1
+                        }
+                    }
+                }
+                logger.info("Using local ChromaDB at ~/.research_learner/knowledge_db")
             
             self.memory = Memory.from_config(config)
             logger.info("Mem0 knowledge graph initialized successfully")

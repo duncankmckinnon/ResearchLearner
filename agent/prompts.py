@@ -12,13 +12,13 @@ class Prompts:
             Analyze the user's request and determine the primary intent. Choose from these categories:
 
             1. "research" - User wants to research a new topic, find papers, discover academic insights
-               - Keywords: "find", "research", "papers about", "study", "discover", "explore"
-               - Tools needed: search_knowledge, get_related_papers, add_research_paper, add_research_insight
+               - Keywords: "find", "research", "papers about", "study", "discover", "explore", "learn about"
+               - Tools needed: search_knowledge, get_related_papers (with high limits), add_research_paper, add_research_insight (multiple times)
                - Example: "Find papers about transformer architectures"
 
             2. "analysis" - User wants to analyze specific papers or research findings in detail
                - Keywords: "analyze", "examine", "review", "evaluate", "critique"
-               - Tools needed: search_knowledge, get_related_papers, add_research_paper (if papers are found), add_research_insight
+               - Tools needed: search_knowledge, get_related_papers (with high limits), add_research_paper (if papers are found), add_research_insight (multiple times)
                - Example: "Analyze the effectiveness of attention mechanisms"
 
             3. "knowledge_query" - User wants to query what they already know or have learned
@@ -183,9 +183,9 @@ class Prompts:
 
             For "research" intent:
             1. First use search_knowledge to check existing knowledge
-            2. Then get_related_papers to find relevant papers
+            2. Then get_related_papers with HIGH LIMITS (10-20 papers) to find comprehensive paper sets
             3. **MANDATORY**: Use add_research_paper to store each valuable paper you find
-            4. **MANDATORY**: Use add_research_insight to capture key insights from your analysis
+            4. **MANDATORY**: Use add_research_insight MULTIPLE TIMES (3-5+ insights) - extract different insights from each paper and cross-paper insights
             5. Use get_knowledge_summary for comprehensive overview
 
             For "knowledge_query" intent:
@@ -196,10 +196,10 @@ class Prompts:
 
             For "analysis" intent:
             1. Use search_knowledge to find existing analysis
-            2. Use get_related_papers to find papers to analyze
+            2. Use get_related_papers with HIGH LIMITS (10-20 papers) to find comprehensive paper sets to analyze
             3. Use get_research_insights for previous insights
             4. **MANDATORY**: Use add_research_paper to store papers you analyze
-            5. **MANDATORY**: Use add_research_insight to capture your analysis conclusions
+            5. **MANDATORY**: Use add_research_insight MULTIPLE TIMES (3-5+ insights) - extract different analytical insights from each paper and cross-paper patterns
 
             For "general" intent:
             1. Use search_knowledge to check if we have relevant knowledge
@@ -207,11 +207,12 @@ class Prompts:
 
             STORAGE GUIDELINES:
             - ALWAYS store papers you retrieve using add_research_paper (paper_data must be a complete dict)
-            - ALWAYS store insights you generate using add_research_insight
+            - ALWAYS store insights you generate using add_research_insight - CALL THIS MULTIPLE TIMES PER SESSION
             - When calling add_research_paper, wrap the complete paper dictionary in "paper_data" parameter
             - Paper data should include: title, authors, arxiv_id, categories, content/abstract
-            - Insights should capture key findings, connections, or conclusions you make
-            - This builds organizational knowledge for future use
+            - Generate MULTIPLE DISTINCT INSIGHTS: methodological insights, theoretical insights, practical applications, limitations, future directions, cross-paper comparisons
+            - Extract 3-5+ insights from each set of papers - don't stop at just one insight
+            - This builds comprehensive organizational knowledge for future use
 
             CORRECT FORMAT EXAMPLES:
             add_research_paper(paper_data={{"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."}})
@@ -222,7 +223,9 @@ class Prompts:
             USER REQUEST: {user_request}
             INTENT: {intent}
 
-            Use tools systematically to: 1) gather information, 2) STORE valuable findings, 3) provide a summary.
+            Use tools systematically to: 1) gather COMPREHENSIVE information with high paper limits, 2) STORE MULTIPLE valuable findings and insights, 3) provide a summary.
+
+            REMEMBER: Quality research requires analyzing MANY papers and extracting MULTIPLE insights. Don't be satisfied with just 1-2 insights - aim for comprehensive knowledge extraction.
             """),
             ("placeholder", "{messages}")
         ])

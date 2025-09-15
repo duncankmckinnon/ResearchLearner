@@ -109,11 +109,17 @@ class LangGraphResearchAgent:
             context = state["context"]
             
             # Use LLM to detect intent with detailed prompting
+            prompt = self.prompts.intent_detection_prompt.format_messages(
+                user_request=user_request,
+                context=context
+            )
+            if state["messages"] is []:
+                state["messages"] = prompt
+            else:
+                state["messages"].extend(prompt)
+            logger.info(f"Intent detection prompt: {prompt}")
             response = self.base_llm.invoke(
-                self.prompts.intent_detection_prompt.format_messages(
-                    user_request=user_request,
-                    context=context
-                )
+                prompt
             )
             
             # Parse the JSON response from the LLM
@@ -170,10 +176,6 @@ class LangGraphResearchAgent:
 
             You should decide which tools to call based on the request. Call tools when you need to search, retrieve, or store information in the knowledge graph.
             """
-            
-            messages = state["messages"]
-            if not any(isinstance(msg, SystemMessage) for msg in messages):
-                state["messages"] = [SystemMessage(content=system_content)] + messages
             
             state["messages"].append(AIMessage(content=f"Intent detected: {intent} (confidence: {confidence}). Reasoning: {reasoning}. Setting up tools: {suggested_tools}"))
             logger.info(f"Intent detected: {intent} (confidence: {confidence}), tools configured: {suggested_tools}")
@@ -260,93 +262,6 @@ class LangGraphResearchAgent:
         
         return "response"
     
-    async def _tool_execution_node_old(self, state: AgentState) -> AgentState:
-        """Second node: plan and execute all necessary tool calls asynchronously"""
-        try:
-            user_request = state["user_request"]
-            intent = state["intent"]
-            context = state["context"]
-            
-            # Check if we already have tool results in the state
-            if "tool_results" in state and state["tool_results"]:
-                logger.info("Tool results already available, skipping execution")
-                return state
-            
-            # Plan tool calls using the tool planning prompt
-            planning_response = self.base_llm.invoke(
-                self.prompts.tool_planning_prompt.format_messages(
-                    user_request=user_request,
-                    intent=intent,
-                    context=context
-                )
-            )
-            
-            # Parse the planned tool calls
-            try:
-                import json
-                planned_calls = json.loads(planning_response.content)
-                logger.info(f"Planned {len(planned_calls)} tool calls for intent '{intent}'")
-                
-                # Execute all planned tool calls asynchronously
-                tool_results = []
-                for call_plan in planned_calls:
-                    tool_name = call_plan["tool"]
-                    tool_args = call_plan["args"]
-                    
-                    # Get the tool instance
-                    tool = next((t for t in self.knowledge_tools if t.name == tool_name), None)
-                    if tool:
-                        # Add hardcoded user_id to args
-                        tool_args["user_id"] = "default"
-                        
-                        try:
-                            # Execute tool asynchronously
-                            result = await tool._arun(**tool_args)
-                            tool_results.append({
-                                "tool": tool_name,
-                                "args": tool_args,
-                                "result": result,
-                                "success": True
-                            })
-                            logger.info(f"Successfully executed {tool_name}")
-                        except Exception as e:
-                            logger.error(f"Error executing {tool_name}: {str(e)}")
-                            tool_results.append({
-                                "tool": tool_name,
-                                "args": tool_args,
-                                "result": f"Error: {str(e)}",
-                                "success": False
-                            })
-                    else:
-                        logger.warning(f"Tool '{tool_name}' not found")
-                        tool_results.append({
-                            "tool": tool_name,
-                            "args": tool_args,
-                            "result": f"Error: Tool '{tool_name}' not available",
-                            "success": False
-                        })
-                
-                # Store results in state
-                state["tool_results"] = tool_results
-                state["messages"].append(AIMessage(
-                    content=f"Executed {len(tool_results)} tool calls for {intent} intent"
-                ))
-                
-                logger.info(f"Completed tool execution: {len([r for r in tool_results if r['success']])} successful, {len([r for r in tool_results if not r['success']])} failed")
-                
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Failed to parse tool planning response: {e}")
-                state["tool_results"] = []
-                state["messages"].append(AIMessage(content="Error parsing tool execution plan"))
-            
-            return state
-            
-        except Exception as e:
-            logger.error(f"Error in tool execution node: {str(e)}")
-            state["tool_results"] = []
-            state["messages"].append(AIMessage(content=f"Error in tool execution: {str(e)}"))
-            return state
-    
     def _response_compilation_node(self, state: AgentState) -> AgentState:
         """Third node: compile the response from the collected context"""
         try:
@@ -411,13 +326,12 @@ class LangGraphResearchAgent:
             state["messages"].append(AIMessage(content=error_response))
             return state
     
-    
     async def process_request(self, user_request: str, session_id: str, context: str) -> Dict[str, Any]:
         """Process a user request through the LangGraph workflow"""
         try:
             # Initialize state
             initial_state = AgentState(
-                messages=[HumanMessage(content=user_request)],
+                messages=[],
                 intent=None,
                 plan=None,
                 current_step=0,

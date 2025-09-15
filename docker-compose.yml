@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  # Init container to sync local data to volume on startup
+  chroma-init:
+    image: alpine:latest
+    volumes:
+      - ./data/chroma:/local_data
+      - chroma_data:/volume_data
+      - ./bin/sync-storage.sh:/sync-storage.sh
+    command: sh /sync-storage.sh container-init
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8002:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    depends_on:
+      chroma-init:
+        condition: service_completed_successfully
+
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
@@ -16,9 +38,12 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.2}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
       - PYTHONUNBUFFERED=1
     depends_on:
       - phoenix
+      - chroma
     command: >
       sh -c "uvicorn agent.server:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
@@ -37,3 +62,34 @@ services:
       sh -c "flask --app agent.demo_code.demo_server run --host=0.0.0.0 --port=8080 --reload"
     volumes:
       - ./:/app
+
+  # Sync service that copies data back to local on shutdown
+  chroma-sync:
+    image: alpine:latest
+    volumes:
+      - chroma_data:/volume_data
+      - ./data/chroma:/local_data
+      - ./bin/sync-storage.sh:/sync-storage.sh
+    command: >
+      sh -c "
+        chmod +x /sync-storage.sh
+        sync_on_exit() {
+          echo '🛑 Received shutdown signal, syncing data...'
+          if [ -f /sync-storage.sh ]; then
+            /bin/sh /sync-storage.sh container-sync
+            echo '✅ Sync complete, exiting'
+          else
+            echo '❌ Sync script not found!'
+          fi
+          exit 0
+        }
+        trap 'sync_on_exit' TERM INT
+        echo '🔄 Sync service ready (will sync data on shutdown)'
+        echo 'Script exists:' && ls -la /sync-storage.sh
+        while true; do sleep 30; done
+      "
+    depends_on:
+      - chroma
+
+volumes:
+  chroma_data:

@@ -36,8 +36,8 @@ class Agent:
         # Get or create session context
         stuff = self.cache.get(conversation_hash)
         if not stuff:
-            context = "start"
-            session_id = self.cache.set(conversation_hash, [{"context": context}])
+            context = []
+            session_id = self.cache.set(conversation_hash, context)
         else:
             context = stuff[0]
             session_id = stuff[1]
