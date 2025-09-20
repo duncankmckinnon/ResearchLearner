@@ -13,23 +13,23 @@ class Prompts:
 
             1. "research" - User wants to research a new topic, find papers, discover academic insights
                - Keywords: "find", "research", "papers about", "study", "discover", "explore", "learn about"
-               - Tools needed: search_knowledge, get_related_papers (with high limits), add_research_paper, add_research_insight (multiple times)
+               - Tools needed: search_knowledge, get_related_papers, add_research_paper (if papers are found), add_research_insight (up to 3 times using all papers found)
                - Example: "Find papers about transformer architectures"
 
             2. "analysis" - User wants to analyze specific papers or research findings in detail
                - Keywords: "analyze", "examine", "review", "evaluate", "critique"
-               - Tools needed: search_knowledge, get_related_papers (with high limits), add_research_paper (if papers are found), add_research_insight (multiple times)
+               - Tools needed: search_knowledge, get_related_papers (if specific papers are requested), add_research_paper (if new papers are found), add_research_insight (up to 3 times based on prior knowledge and new papers found)
                - Example: "Analyze the effectiveness of attention mechanisms"
 
             3. "knowledge_query" - User wants to query what they already know or have learned
                - Keywords: "what do I know", "what have I learned", "remember", "stored", "previous", "insights", "tell me about"
-               - Tools needed: search_knowledge, get_research_insights, get_knowledge_summary, add_research_paper (if papers are found), add_research_insight
+               - Tools needed: search_knowledge, get_research_insights, get_knowledge_summary
                - Example: "What do I know about neural networks?"
 
-            4. "general" - General conversation, questions not directly related to research
+            4. "general" - General conversation, questions not directly related to research that can be answered with the knowledge graph
                - Keywords: "hello", "how are you", "help", "explain" (without research context)
-               - Tools needed: search_knowledge, get_knowledge_summary, add_research_paper (if papers are found), add_research_insight
-               - Example: "Hello, how can you help me?"
+               - Tools needed: search_knowledge
+               - Example: "Give me an interesting fact you've learned"
 
             Consider the context provided to better understand the request.
 
@@ -49,36 +49,38 @@ class Prompts:
         return ChatPromptTemplate.from_messages([
             ("system", """You are an expert at creating execution plans for different types of requests.
             
-            Based on the user's request and detected intent, create a step-by-step plan.
+            Based on the user's request and detected intent, create a step-by-step plan using available tools and your prior knowledge.
             
-            For "research" intent, typical steps might include:
+            For "research" intent:
             1. Extract research topic/keywords
-            2. Search for relevant papers in knowledge graph and ArXiv
-            3. Download and analyze top papers
-            4. Synthesize findings
-            5. Add research paper and insights to knowledge graph
-            6. Present results
+            2. Search for relevant insights and papers in knowledge graph
+            3. If more information is needed, find more papers by searching ArXiv
+            4. Download and analyze top papers
+            5. Synthesize findings into useful insights
+            6. Add research paper and insights to knowledge graph
+            7. Present results
             
-            For "analysis" intent, typical steps might include:
-            1. Identify specific papers/documents
-            2. Download or retrieve content in knowledge graph and ArXiv
+            For "analysis" intent:
+            1. Determine what topics to analyze
+            2. Download or retrieve content in knowledge graph that relates to the topics
             3. Analyze content thoroughly
-            4. Extract key insights
-            5. Add research paper and insights to knowledge graph
-            6. Present results
+            4. If more information is needed to answer the user's question, find more papers by searching ArXiv
+            5. Collect findings of your analysis
+            6. If you've used new papers, add them to knowledge graph
+            7. If you've found new and interesting insights, add them to knowledge graph
+            8. Present results
             
-            For "knowledge_query" intent, typical steps might include:
-            1. Search knowledge base 
+            For "knowledge_query" intent:
+            1. Search knowledge base for relevant information and insights
             2. Retrieve relevant information and insights
             3. Synthesize response
-            4. Add any new research papers or insights to knowledge graph
-            5. Present results
+            4. Present results
             
-            For "general" intent, typical steps might include:
-            1. Understand the question
-            2. Formulate response
-            3. Search knowledge graph and ArXiv
-            4. Add any new research papers or insights to knowledge graph
+            For "general" intent:
+            1. Understand the question and the context
+            2. Search knowledge graph for relevant information and insights
+            3. Formulate response
+            4. If you've found new and interesting insights, add them to knowledge graph
             5. Present results
             
             Respond with a JSON list of steps as strings.
@@ -92,14 +94,14 @@ class Prompts:
         return ChatPromptTemplate.from_messages([
             ("system", """Extract the main research topic or keywords from the user's request.
             
-            Focus on the core subject matter they want to research. 
+            Focus on the core subject matter they want to research. Make sure to be specific and detailed.
             If the subject is clear, include keywords that are related to the subject but not necessarily in the request.   
             Respond with just the topic/keywords, no additional text.
             
             Examples:
             - "Find papers about transformer architectures" -> "transformer architectures", "attention mechanism"
             - "Research quantum computing applications" -> "quantum computing applications"
-            - "I want to learn about neural networks" -> "neural networks", "deep learning"
+            - "I want to learn about neural networks" -> "neural networks", "deep learning", "convolutional neural networks"
             """),
             ("human", "User request: {user_request}")
         ])
@@ -122,49 +124,22 @@ class Prompts:
 
             Based on the user's request and detected intent, plan the specific tool calls needed to gather all necessary information.
 
-            AVAILABLE TOOLS:
+            TOOL DEFINITIONS:
             1. search_knowledge(query, limit=10) - Search and retrieve existing knowledge
             2. get_related_papers(topic, limit=5) - Find new related research papers  
-            3. get_research_insights(topic, limit=10) - Get stored insights
+            3. get_research_insights(topic, limit=5) - Get stored insights
             4. add_research_paper(paper_data) - Store a paper (paper_data must be a complete dict)
             5. add_research_insight(insight, topic, context) - Store an insight
             6. get_knowledge_summary(topic) - Get comprehensive summary
 
-            TOOL EXECUTION PLANS BY INTENT:
-
-            For "research" intent:
-            - search_knowledge(query=main_topic) to check existing knowledge
-            - get_related_papers(topic=main_topic) to find relevant papers
-            - get_knowledge_summary(topic=main_topic) for comprehensive overview
-            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
-            - add_research_insight(insight, topic, context) to store the insight
-
-            For "knowledge_query" intent:
-            - search_knowledge(query=main_topic) to find relevant information
-            - get_research_insights(topic=main_topic) to get stored insights  
-            - get_knowledge_summary(topic=main_topic) for complete summary
-            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
-            - add_research_insight(insight, topic, context) to store the insight
-
-            For "analysis" intent:
-            - search_knowledge(query=analysis_target) to find existing analysis
-            - get_related_papers(topic=analysis_target) to find papers to analyze
-            - get_research_insights(topic=analysis_target) to get previous insights
-            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
-            - add_research_insight(insight, topic, context) to store the insight
-
-            For "general" intent:
-            - search_knowledge(query=user_request) to check if we have relevant knowledge
-            - add_research_paper(paper_data) to store the paper (paper_data must be a complete dict)
-            - add_research_insight(insight, topic, context) to store the insight
-
-            Respond with ONLY a JSON array. No other text.
+            Reference the available_tools and the prior messages to decide which tools to use next and in what order.
 
             Examples:
-            [{{"tool": "search_knowledge", "args": {{"query": "neural networks", "limit": 10}}}}]
+            [{{"tool": "search_knowledge", "args": {{"query": "neural networks", "limit": 10}}}}]   
             [{{"tool": "search_knowledge", "args": {{"query": "transformers", "limit": 10}}}}, {{"tool": "get_related_papers", "args": {{"topic": "transformers", "limit": 5}}}}]
             [{{"tool": "add_research_paper", "args": {{"paper_data": {{"title": "Paper Title", "authors": ["Author1"], "arxiv_id": "1234.5678", "categories": ["cs.AI"], "content": "Abstract text"}}}}}}]
             [{{"tool": "get_knowledge_summary", "args": {{"topic": "machine learning"}}}}]
+            [] - No tools needed
             """),
             ("human", "User request: {user_request}\nIntent: {intent}\nContext: {context}")
         ])
@@ -178,32 +153,6 @@ class Prompts:
             CRITICAL RESPONSIBILITY: You MUST store valuable information in the knowledge graph as you find it. This is essential for building organizational knowledge.
 
             Based on the user's request and detected intent, use the appropriate tools to gather comprehensive information AND STORE IT.
-
-            INTENT-BASED TOOL STRATEGIES:
-
-            For "research" intent:
-            1. First use search_knowledge to check existing knowledge
-            2. Then get_related_papers with HIGH LIMITS (10-20 papers) to find comprehensive paper sets
-            3. **MANDATORY**: Use add_research_paper to store each valuable paper you find
-            4. **MANDATORY**: Use add_research_insight MULTIPLE TIMES (3-5+ insights) - extract different insights from each paper and cross-paper insights
-            5. Use get_knowledge_summary for comprehensive overview
-
-            For "knowledge_query" intent:
-            1. Use search_knowledge to find relevant information
-            2. Use get_research_insights to get stored insights
-            3. Use get_knowledge_summary for complete summary
-            4. **MANDATORY**: Use add_research_insight to store any new insights you generate from synthesizing information
-
-            For "analysis" intent:
-            1. Use search_knowledge to find existing analysis
-            2. Use get_related_papers with HIGH LIMITS (10-20 papers) to find comprehensive paper sets to analyze
-            3. Use get_research_insights for previous insights
-            4. **MANDATORY**: Use add_research_paper to store papers you analyze
-            5. **MANDATORY**: Use add_research_insight MULTIPLE TIMES (3-5+ insights) - extract different analytical insights from each paper and cross-paper patterns
-
-            For "general" intent:
-            1. Use search_knowledge to check if we have relevant knowledge
-            2. **IF APPLICABLE**: Use add_research_insight to store any valuable insights generated
 
             STORAGE GUIDELINES:
             - ALWAYS store papers you retrieve using add_research_paper (paper_data must be a complete dict)

@@ -86,7 +86,7 @@ class SearchKnowledgeTool(BaseTool):
 class GetRelatedPapersTool(BaseTool):
     """Tool for getting related research papers"""
     name: str = "get_related_papers"
-    description: str = "Get research papers related to a specific topic from knowledge graph and ArXiv. Use high limits (10-20) to gather comprehensive paper sets for thorough analysis."
+    description: str = "Get research papers related to a specific topic from knowledge graph and ArXiv. Start by gathering a few papers to get a sense of the topic and then widen the search if necessary to find the information requested."
     args_schema: type = GetRelatedPapersInput
 
     def _run(self, topic: str, limit: int = 5) -> Union[List[Union[Dict[str, Any], None]], None]:
@@ -187,7 +187,7 @@ class AddResearchPaperTool(BaseTool):
 class AddResearchInsightTool(BaseTool):
     """Tool for adding research insights to knowledge graph"""
     name: str = "add_research_insight"
-    description: str = "Add a research insight to the knowledge graph for future retrieval. CALL THIS MULTIPLE TIMES per research session - extract multiple distinct insights from each paper set. Be comprehensive and detailed."
+    description: str = "Add a research insight to the knowledge graph for future retrieval. CALL THIS UP TO 3 TIMES - extract distinct insights from each paper set. Be comprehensive and detailed."
     args_schema: type = AddResearchInsightInput
 
     def _run(self, insight: str, topic: str, paper_ids: Optional[List[str]] = None, context: Optional[Dict[str, Any]] = None) -> bool:
