@@ -126,13 +126,11 @@ class LangGraphResearchAgent:
             try:
                 import json
                 intent_data = json.loads(response.content.strip())
-                
+
                 intent = intent_data.get("intent", "general")
-                confidence = intent_data.get("confidence", "medium")
-                reasoning = intent_data.get("reasoning", "")
                 suggested_tools = intent_data.get("suggested_tools", ["search_knowledge"])
                 instructions = intent_data.get("instructions", "Process the request using available tools.")
-                
+
                 # Validate intent
                 valid_intents = ["research", "analysis", "knowledge_query", "general"]
                 if intent not in valid_intents:
@@ -140,25 +138,11 @@ class LangGraphResearchAgent:
                     intent = "general"
                     suggested_tools = ["search_knowledge"]
                     instructions = "Process the request using basic knowledge search."
-                
+
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Failed to parse LLM intent response: {e}. Using fallback detection.")
                 # Fallback to basic keyword detection
-                request_lower = user_request.lower()
-                if any(word in request_lower for word in ["find", "search", "papers", "research", "study"]):
-                    intent = "research"
-                    suggested_tools = ["search_knowledge", "get_related_papers", "add_research_paper", "add_research_insight"]
-                    instructions = "You are helping with research. Use search_knowledge first, then get_related_papers."
-                elif any(word in request_lower for word in ["know", "learned", "remember", "stored", "previous", "insights"]):
-                    intent = "knowledge_query"
-                    suggested_tools = ["search_knowledge", "get_research_insights", "get_knowledge_summary"]
-                    instructions = "You are answering a knowledge query. Search existing knowledge and get insights."
-                else:
-                    intent = "general"
-                    suggested_tools = ["search_knowledge"]
-                    instructions = "This is a general question. Use knowledge tools if relevant."
-                confidence = "low"
-                reasoning = "Fallback detection due to parsing error"
+                raise e
             
             # Set up state with LLM-determined intent and tool configuration
             state["intent"] = intent
@@ -177,8 +161,8 @@ class LangGraphResearchAgent:
             You should decide which tools to call based on the request. Call tools when you need to search, retrieve, or store information in the knowledge graph.
             """
             
-            state["messages"].append(AIMessage(content=f"Intent detected: {intent} (confidence: {confidence}). Reasoning: {reasoning}. Setting up tools: {suggested_tools}"))
-            logger.info(f"Intent detected: {intent} (confidence: {confidence}), tools configured: {suggested_tools}")
+            state["messages"].append(AIMessage(content=f"Intent detected: {intent}. Setting up tools: {suggested_tools}"))
+            logger.info(f"Intent detected: {intent}, tools configured: {suggested_tools}")
             
             return state
             
@@ -280,37 +264,22 @@ class LangGraphResearchAgent:
                         "result": msg.content
                     })
             
-            # Create compilation prompt based on gathered information
-            compilation_prompt = f"""
-            Based on the user's request and the information gathered through {tool_call_count} tool execution rounds, provide a comprehensive response.
+            # Prepare research data for response generation
+            research_data = {
+                "intent": intent,
+                "tools_used": ', '.join(tools_used) if tools_used else 'none',
+                "tool_call_count": tool_call_count,
+                "tool_results": tool_results
+            }
 
-            User request: {user_request}
-            Intent: {intent}
-            Tools used: {', '.join(tools_used) if tools_used else 'none'}
+            # Use the response generation prompt from prompts class
+            prompt_messages = self.prompts.response_generation_prompt.format_messages(
+                user_request=user_request,
+                research_data=str(research_data)
+            )
 
-            Tool results gathered:
-            """
-            
-            if tool_results:
-                for i, tool_result in enumerate(tool_results, 1):
-                    tool_name = tool_result["tool"]
-                    result = tool_result["result"]
-                    compilation_prompt += f"\n{i}. {tool_name}: {str(result)}\n"
-            else:
-                compilation_prompt += "\nNo tool results available from this session."
-            
-            compilation_prompt += """
-
-        Based on the information gathered above, provide a clear, comprehensive response that:
-        1. Directly addresses the user's request
-        2. Synthesizes information from multiple sources when available
-        3. Indicates what information was found vs. not found
-        4. Provides actionable insights or next steps when appropriate
-
-        Be conversational but informative."""
-            
             # Generate final response using the structured information
-            response = self.base_llm.invoke([HumanMessage(content=compilation_prompt)])
+            response = self.base_llm.invoke(prompt_messages)
             
             state["final_response"] = response.content
             state["messages"].append(response)
