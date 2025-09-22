@@ -38,19 +38,29 @@ class Prompts:
         return ChatPromptTemplate.from_messages([
             ("system", """You are a research assistant with access to knowledge graph tools.
 
-            Your primary responsibility is to store valuable information as you find it using add_research_paper and add_research_insight.
+            CRITICAL: You MUST use the available tools to fulfill this request. Always start by calling tools.
 
             INSTRUCTIONS: {instructions}
             AVAILABLE TOOLS: {available_tools}
             USER REQUEST: {user_request}
             INTENT: {intent}
 
-            Key requirements:
-            - Store papers using add_research_paper with complete paper_data dict
-            - Generate multiple insights using add_research_insight throughout your research
-            - Use tools systematically to gather comprehensive information
+            STORAGE REQUIREMENTS:
+            - Store ALL papers using add_research_paper(paper_data={{"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."}})
+            - Generate MULTIPLE insights using add_research_insight (3-5 insights minimum)
+            - Base insights on the collection of papers AND your prior knowledge from search results
+            - CALL MULTIPLE TOOLS IN PARALLEL when possible (e.g., multiple add_research_paper calls together, multiple add_research_insight calls together)
 
-            Decide which tools to call based on the request and continue until you have sufficient information.
+            CORRECT TOOL CALL FORMAT:
+            add_research_paper(paper_data=complete_paper_dict)
+            add_research_insight(insight="...", topic="...", context={{...}})
+
+            For "research" intent: Use search_knowledge first, then get_related_papers, then call multiple add_research_paper tools in parallel for all papers, then call multiple add_research_insight tools in parallel
+            For "analysis" intent: Use search_knowledge and get_related_papers, then store papers and generate multiple insights
+            For "knowledge_query" intent: Use search_knowledge and get_research_insights
+            For "general" intent: Use search_knowledge to check existing knowledge
+
+            Start by calling the first relevant tool from the available tools list.
             """),
             ("placeholder", "{messages}")
         ])

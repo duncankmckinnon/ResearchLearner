@@ -113,14 +113,8 @@ class LangGraphResearchAgent:
                 user_request=user_request,
                 context=context
             )
-            if state["messages"] is []:
-                state["messages"] = prompt
-            else:
-                state["messages"].extend(prompt)
             logger.info(f"Intent detection prompt: {prompt}")
-            response = self.base_llm.invoke(
-                prompt
-            )
+            response = self.base_llm.invoke(prompt)
             
             # Parse the JSON response from the LLM
             try:
@@ -148,22 +142,10 @@ class LangGraphResearchAgent:
             state["intent"] = intent
             state["available_tools"] = suggested_tools
             state["tool_instructions"] = instructions
-            
-            # Add system message with context
-            system_content = f"""
-            {instructions}
 
-            Available tools: {', '.join(suggested_tools)}
+            # Initialize clean message history with just the user request
+            state["messages"] = [HumanMessage(content=user_request)]
 
-            User request: {user_request}
-            Context: {context}
-
-            You should decide which tools to call based on the request. Call tools when you need to search, retrieve, or store information in the knowledge graph.
-            """
-            
-            state["messages"].append(AIMessage(content=f"Intent detected: {intent}. Setting up tools: {suggested_tools}"))
-            logger.info(f"Intent detected: {intent}, tools configured: {suggested_tools}")
-            
             return state
             
         except Exception as e:
@@ -171,7 +153,6 @@ class LangGraphResearchAgent:
             state["intent"] = "general"
             state["available_tools"] = ["search_knowledge"]
             state["tool_instructions"] = "Error occurred during setup. Using basic knowledge search."
-            state["messages"].append(AIMessage(content=f"Error in setup: {str(e)}"))
             return state
     
     def _agent_node(self, state: AgentState) -> AgentState:
@@ -184,10 +165,6 @@ class LangGraphResearchAgent:
             tools_used = state.get("tools_used") or []
             tool_call_count = state.get("tool_call_count", 0)
             
-            # Filter LLM to only use tools configured for this intent
-            configured_tools = [tool for tool in self.knowledge_tools if tool.name in available_tools]
-            focused_llm = self.llm.bind_tools(configured_tools) if configured_tools else self.llm
-            
             # Use prompt from prompts class
             prompt_messages = self.prompts.agent_execution_prompt.format_messages(
                 instructions=tool_instructions,
@@ -196,9 +173,17 @@ class LangGraphResearchAgent:
                 intent=intent,
                 messages=state["messages"]
             )
-            
-            # Call LLM - it will decide which tools to call
-            response = focused_llm.invoke(prompt_messages)
+
+            # Call LLM with all tools available - it will decide which tools to call
+            logger.info(f"Calling LLM with tools. Available tools: {available_tools}")
+            logger.info(f"Tool instructions: {tool_instructions}")
+            response = self.llm.invoke(prompt_messages)
+            logger.info(f"LLM response type: {type(response)}")
+            logger.info(f"LLM response has tool_calls: {hasattr(response, 'tool_calls')}")
+            if hasattr(response, 'tool_calls'):
+                logger.info(f"Tool calls value: {response.tool_calls}")
+                logger.info(f"Number of tool calls: {len(response.tool_calls) if response.tool_calls else 0}")
+            logger.info(f"LLM response content preview: {response.content[:200] if hasattr(response, 'content') else 'No content'}")
             
             # Track tool usage in state instead of logging
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -229,7 +214,6 @@ class LangGraphResearchAgent:
             
         except Exception as e:
             logger.error(f"Error in agent node: {str(e)}")
-            state["messages"].append(AIMessage(content=f"Error in agent processing: {str(e)}"))
             return state
     
     def _should_continue_to_tools(self, state: AgentState) -> str:
