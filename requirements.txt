@@ -2,7 +2,9 @@ flask>=2.0.0
 flask-cors>=3.0.0
 python-dateutil>=2.8.2
 python-dotenv>=1.0.0
-arize-phoenix>=0.0.6
+arize-phoenix==11.34.0
+uvicorn==0.34.0
+pydantic==2.10.3
 openinference-semantic-conventions>=0.0.1
 openinference-instrumentation-openai>=0.0.1
 openinference-instrumentation-langchain>=0.0.1
