@@ -8,25 +8,34 @@ class Prompts:
         return ChatPromptTemplate.from_messages([
             ("system", """Analyze the user's request and determine the primary intent. Choose from these categories:
 
-            1. "research" - Research new topics, find papers, discover academic insights
-               - Tools: search_knowledge, get_related_papers, add_research_paper, add_research_insight
-               - Instructions: Search knowledge graph, find papers related to [topic], generate insights from papers, store papers and insights in knowledge graph
+            1. Research new topics, find papers, discover academic insights
+            - Example: "What are the latest research on transformer architectures?"
+            - intent: "research"
+            - tools: search_knowledge, get_related_papers, add_research_paper, add_research_insight
+            - instructions: Search knowledge graph, find papers related to [topic], generate insights from papers, store papers and insights in knowledge graph
 
-            2. "analysis" - Analyze specific papers or research findings in detail
-               - Tools: search_knowledge, get_related_papers, add_research_paper, add_research_insight
-               - Instructions: Search knowledge graph for [topic], generate insights from findings, store insights in knowledge graph
+            2. Analyze specific papers or research findings in detail
+            - Example: "What are the key findings of the paper 'Attention is all you need'?"
+            - intent: "analysis"
+            - tools: search_knowledge, get_related_papers, add_research_paper, add_research_insight
+            - instructions: Search knowledge graph for [topic], generate insights from findings, store insights in knowledge graph
 
-            3. "knowledge_query" - Query existing knowledge and stored insights
-               - Tools: search_knowledge, get_research_insights, get_knowledge_summary
-               - Instructions: Search knowledge graph for [topic], collect prior insights and papers, summarize findings
+            3. Query existing knowledge and stored insights
+            - Example: "What have we learned about neural networks so far?"
+            - intent: "knowledge_query"
+            - tools: search_knowledge, get_research_insights, get_knowledge_summary
+            - instructions: Search knowledge graph for [topic], collect prior insights and papers, summarize findings
 
-            4. "general" - General conversation or questions answerable with knowledge graph
-               - Tools: search_knowledge
-               - Instructions: Search knowledge graph for relevant topics, provide helpful response
-
+            4. General conversation or questions answerable with knowledge graph
+            - Example: "Give me an interesting fact you've learned"
+            - intent: "general"
+            - tools: search_knowledge
+            - instructions: Search knowledge graph for relevant topics, provide helpful response
+ 
             Replace [topic] with the actual topic from the user's request in the instructions.
 
-            Respond with ONLY a JSON object containing: intent, suggested_tools, instructions.
+            Respond with ONLY a JSON object in this exact format - no other text:
+            {{"intent": "...", "suggested_tools": ["...", "..."], "instructions": "..."}}
             """),
             ("human", "User request: {user_request}\n\nContext: {context}")
         ])
@@ -36,31 +45,21 @@ class Prompts:
     def agent_execution_prompt(self) -> ChatPromptTemplate:
         """Prompt for the agent node to decide which tools to use"""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are a research assistant with access to knowledge graph tools.
+            ("system", """You are an agent with access to knowledge graph tools for research tasks. 
+            Your goal is to collect the information needed to fulfill the user's request by following the instructions and only using the tools specified below.
 
-            CRITICAL: You MUST use the available tools to fulfill this request. Always start by calling tools.
+            CRITICAL: You MUST follow the instructions and use only the suggested tools to fulfill this request. Always start by calling tools.
 
-            INSTRUCTIONS: {instructions}
-            AVAILABLE TOOLS: {available_tools}
             USER REQUEST: {user_request}
             INTENT: {intent}
-
+            INSTRUCTIONS: {instructions}
+            TOOLS: {suggested_tools}
+            
             STORAGE REQUIREMENTS:
-            - Store ALL papers using add_research_paper(paper_data={{"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."}})
-            - Generate MULTIPLE insights using add_research_insight (3-5 insights minimum)
-            - Base insights on the collection of papers AND your prior knowledge from search results
-            - CALL MULTIPLE TOOLS IN PARALLEL when possible (e.g., multiple add_research_paper calls together, multiple add_research_insight calls together)
-
-            CORRECT TOOL CALL FORMAT:
-            add_research_paper(paper_data=complete_paper_dict)
-            add_research_insight(insight="...", topic="...", context={{...}})
-
-            For "research" intent: Use search_knowledge first, then get_related_papers, then call multiple add_research_paper tools in parallel for all papers, then call multiple add_research_insight tools in parallel
-            For "analysis" intent: Use search_knowledge and get_related_papers, then store papers and generate multiple insights
-            For "knowledge_query" intent: Use search_knowledge and get_research_insights
-            For "general" intent: Use search_knowledge to check existing knowledge
-
-            Start by calling the first relevant tool from the available tools list.
+            - If new papers are retrieved, store ALL new papers using add_research_paper(paper_data={{"title": "...", "authors": [...], "arxiv_id": "...", "categories": [...], "content": "..."}})
+            - If new papers are retrieved, always generate insights from them and store them using add_research_insight (3 insights minimum)
+            - Base insights on the collection of papers AND your prior knowledge from the knowledge graph
+            - Call tools in parallel when possible (e.g., multiple add_research_paper calls together, multiple add_research_insight calls together)
             """),
             ("placeholder", "{messages}")
         ])
@@ -69,13 +68,14 @@ class Prompts:
     def response_generation_prompt(self) -> ChatPromptTemplate:
         """Prompt for generating final responses"""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful research assistant. Generate a comprehensive response based on the research data and user request.
+            ("system", """You are a helpful research assistant.
+            Generate a comprehensive response based on the research data and user request.
             
             If research data is available, include:
+            - A general summary of the research and response to the user's request
             - Key findings from the research
             - Relevant paper citations
             - Actionable insights
-            - Suggestions for further research
             
             If no research data is available, provide a helpful general response.
             

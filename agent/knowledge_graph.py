@@ -99,13 +99,21 @@ class KnowledgeGraphManager:
                 metadata["authors"] = ", ".join(str(author) for author in authors)
             else:
                 metadata["authors"] = str(authors)
-                
+
             categories = paper_data.get("categories", [])
             if isinstance(categories, list):
                 metadata["categories"] = ", ".join(str(cat) for cat in categories)
             else:
                 metadata["categories"] = str(categories)
-            
+
+            # Handle URLs and DOIs from PDF extraction metadata
+            pdf_metadata = paper_data.get("pdf_metadata", {})
+            if pdf_metadata:
+                for key, value in pdf_metadata.items():
+                    if isinstance(value, list):
+                        metadata[key] = ", ".join(str(item) for item in value)
+                    else:
+                        metadata[key] = str(value)
             result = self.memory.add(paper_text, user_id="default", metadata=metadata)
             logger.info(f"Added paper to knowledge graph: {paper_data.get('title', 'Unknown')}")
             
@@ -231,6 +239,8 @@ class KnowledgeGraphManager:
                             "authors": metadata.get("authors", "").split(", ") if metadata.get("authors") else [],
                             "arxiv_id": metadata.get("arxiv_id", ""),
                             "categories": metadata.get("categories", "").split(", ") if metadata.get("categories") else [],
+                            "urls": [url.strip() for url in metadata.get("urls", "").split(", ") if url.strip()],
+                            "dois": [doi.strip() for doi in metadata.get("dois", "").split(", ") if doi.strip()],
                             "relevance_score": result.get("score", 0),
                             "content": result.get("memory", ""),
                             "source": "knowledge_graph"

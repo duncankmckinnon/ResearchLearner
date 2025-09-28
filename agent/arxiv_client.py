@@ -119,35 +119,51 @@ class SimpleArxivClient:
         """Read the content of a downloaded paper"""
         try:
             import arxiv
-            
+
             # First get the paper metadata
             search = arxiv.Search(id_list=[paper_id])
             client = arxiv.Client()
             paper = next(client.results(search), None)
-            
+
             if not paper:
                 return ArxivResult(
                     success=False,
                     data=None,
                     error=f"Paper {paper_id} not found"
                 )
-            
+
             # Check if PDF exists
             pdf_path = os.path.join(self.storage_path, f"{paper_id}.pdf")
-            
-            # For now, return metadata and abstract
-            # In a full implementation, you'd extract text from the PDF
+
+            # Extract full text from PDF if it exists
+            full_content = ""
+            pdf_metadata = {}
+            if os.path.exists(pdf_path):
+                try:
+                    full_content, pdf_metadata = self._extract_pdf_text(pdf_path)
+                    logger.info(f"Extracted {len(full_content)} characters from PDF {paper_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract PDF text for {paper_id}: {str(e)}")
+                    full_content = f"[PDF text extraction failed: {str(e)}]"
+
+            # Combine abstract and full content
+            if full_content and not full_content.startswith("[PDF text extraction failed"):
+                content = f"Abstract: {paper.summary}\n\nFull Paper Content:\n{full_content}"
+            else:
+                content = f"Abstract: {paper.summary}\n\n[PDF not available or text extraction failed]"
+
             paper_content = {
                 "paper_id": paper_id,
                 "title": paper.title,
                 "authors": [str(author) for author in paper.authors],
                 "abstract": paper.summary,
-                "content": f"Abstract: {paper.summary}\n\n[Full PDF content extraction would require additional PDF processing libraries]",
+                "content": content,
                 "categories": paper.categories,
                 "published": paper.published.isoformat() if paper.published else "",
-                "pdf_path": pdf_path if os.path.exists(pdf_path) else None
+                "pdf_path": pdf_path if os.path.exists(pdf_path) else None,
+                "pdf_metadata": pdf_metadata
             }
-            
+
             return ArxivResult(success=True, data=paper_content)
             
         except ImportError:
@@ -159,7 +175,56 @@ class SimpleArxivClient:
         except Exception as e:
             logger.error(f"Error reading paper {paper_id}: {str(e)}")
             return ArxivResult(success=False, data=None, error=str(e))
-    
+
+    def _extract_pdf_text(self, pdf_path: str) -> tuple[str, dict]:
+        """Extract text from a PDF file using PyMuPDF and return text + metadata"""
+        import fitz  # PyMuPDF
+        import re
+
+        # Open the PDF
+        doc = fitz.open(pdf_path)
+        text = ""
+
+        # Extract text from each page
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text += page.get_text()
+            text += "\n\n"  # Add page separator
+
+        doc.close()
+
+        # Extract URLs and DOIs before cleaning
+        urls = re.findall(r'https?://[^\s]+', text)
+        dois = re.findall(r'doi:[^\s]+', text)
+
+        # Clean up the text
+        text = self._clean_extracted_text(text)
+
+        metadata = {
+            "urls": list(set(urls)),  # Remove duplicates
+            "dois": list(set(dois))   # Remove duplicates
+        }
+
+        return text, metadata
+
+    def _clean_extracted_text(self, text: str) -> str:
+        """Clean and format extracted text"""
+        import re
+
+        # Remove excessive whitespace
+        text = re.sub(r'\n\s*\n', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+
+        # Remove page headers/footers (common patterns)
+        text = re.sub(r'\n\d+\n', '\n', text)  # Page numbers on their own line
+        text = re.sub(r'arXiv:\d+\.\d+v\d+.*?\n', '', text)  # ArXiv headers
+
+        # Remove URLs and DOIs from text (we saved them in metadata)
+        text = re.sub(r'https?://[^\s]+', '', text)
+        text = re.sub(r'doi:[^\s]+', '', text)
+
+        return text.strip()
+
     async def list_papers(self) -> ArxivResult:
         """List all downloaded papers"""
         try:

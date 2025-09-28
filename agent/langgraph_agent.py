@@ -21,17 +21,16 @@ logger = logging.getLogger("langgraph_agent")
 class AgentState(TypedDict):
     """State for the LangGraph agent"""
     messages: Annotated[List[BaseMessage], add_messages]
+    context: str
     intent: Optional[str]
-    plan: Optional[List[str]]
     current_step: int
     research_data: Optional[Dict[str, Any]]
     knowledge_data: Optional[Dict[str, Any]]
-    final_response: Optional[str]
     user_request: str
+    response: Optional[str]
     session_id: str
-    context: str
     tool_instructions: Optional[str]  # Instructions for what tools to use and when
-    available_tools: Optional[List[str]]  # List of available tool names
+    suggested_tools: Optional[List[str]]  # List of available tool names
     tool_results: Optional[List[Dict[str, Any]]]  # Results from tool execution
     tools_used: Optional[List[str]]  # Track which tools have been called
     tool_call_count: int  # Track number of tool call iterations
@@ -109,6 +108,7 @@ class LangGraphResearchAgent:
             context = state["context"]
             
             # Use LLM to detect intent with detailed prompting
+            logger.info(f"Intent detection prompt setup")
             prompt = self.prompts.intent_detection_prompt.format_messages(
                 user_request=user_request,
                 context=context
@@ -119,39 +119,46 @@ class LangGraphResearchAgent:
             # Parse the JSON response from the LLM
             try:
                 import json
-                intent_data = json.loads(response.content.strip())
+                import re
+
+                # Log the raw response for debugging
+                logger.info(f"Raw LLM response: {response.content}")
+
+                # Try to extract JSON from the response
+                content = response.content.strip()
+
+                # Look for JSON object in the response
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    intent_data = json.loads(json_str)
+                else:
+                    # If no JSON found, try parsing the whole content
+                    intent_data = json.loads(content)
 
                 intent = intent_data.get("intent", "general")
                 suggested_tools = intent_data.get("suggested_tools", ["search_knowledge"])
                 instructions = intent_data.get("instructions", "Process the request using available tools.")
 
-                # Validate intent
-                valid_intents = ["research", "analysis", "knowledge_query", "general"]
-                if intent not in valid_intents:
-                    logger.warning(f"Invalid intent '{intent}' received, defaulting to 'general'")
-                    intent = "general"
-                    suggested_tools = ["search_knowledge"]
-                    instructions = "Process the request using basic knowledge search."
-
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to parse LLM intent response: {e}. Using fallback detection.")
-                # Fallback to basic keyword detection
+                logger.warning(f"Failed to parse LLM intent response: {e}")
+                logger.warning(f"Response content was: {response.content}")
                 raise e
             
             # Set up state with LLM-determined intent and tool configuration
             state["intent"] = intent
-            state["available_tools"] = suggested_tools
+            state["suggested_tools"] = suggested_tools
             state["tool_instructions"] = instructions
 
             # Initialize clean message history with just the user request
-            state["messages"] = [HumanMessage(content=user_request)]
+            state["messages"] = [HumanMessage(content=user_request), AIMessage(content=str(intent_data))]
 
             return state
             
         except Exception as e:
             logger.error(f"Error in intent and setup: {str(e)}")
             state["intent"] = "general"
-            state["available_tools"] = ["search_knowledge"]
+            state["suggested_tools"] = ["search_knowledge"]
             state["tool_instructions"] = "Error occurred during setup. Using basic knowledge search."
             return state
     
@@ -160,7 +167,7 @@ class LangGraphResearchAgent:
         try:
             user_request = state["user_request"]
             intent = state["intent"]
-            available_tools = state.get("available_tools", [])
+            suggested_tools = state.get("suggested_tools", [])
             tool_instructions = state.get("tool_instructions", "")
             tools_used = state.get("tools_used") or []
             tool_call_count = state.get("tool_call_count", 0)
@@ -168,22 +175,14 @@ class LangGraphResearchAgent:
             # Use prompt from prompts class
             prompt_messages = self.prompts.agent_execution_prompt.format_messages(
                 instructions=tool_instructions,
-                available_tools=', '.join(available_tools),
+                suggested_tools=', '.join(suggested_tools),
                 user_request=user_request,
                 intent=intent,
                 messages=state["messages"]
             )
 
             # Call LLM with all tools available - it will decide which tools to call
-            logger.info(f"Calling LLM with tools. Available tools: {available_tools}")
-            logger.info(f"Tool instructions: {tool_instructions}")
             response = self.llm.invoke(prompt_messages)
-            logger.info(f"LLM response type: {type(response)}")
-            logger.info(f"LLM response has tool_calls: {hasattr(response, 'tool_calls')}")
-            if hasattr(response, 'tool_calls'):
-                logger.info(f"Tool calls value: {response.tool_calls}")
-                logger.info(f"Number of tool calls: {len(response.tool_calls) if response.tool_calls else 0}")
-            logger.info(f"LLM response content preview: {response.content[:200] if hasattr(response, 'content') else 'No content'}")
             
             # Track tool usage in state instead of logging
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -265,17 +264,15 @@ class LangGraphResearchAgent:
             # Generate final response using the structured information
             response = self.base_llm.invoke(prompt_messages)
             
-            state["final_response"] = response.content
+            state["response"] = response.content
             state["messages"].append(response)
-            
-            logger.info(f"Response compiled for intent: {intent} using {len(tools_used)} tools across {tool_call_count} iterations")
             
             return state
             
         except Exception as e:
             logger.error(f"Error in response compilation: {str(e)}")
             error_response = "I apologize, but I encountered an error while compiling the response. Please try again."
-            state["final_response"] = error_response
+            state["response"] = error_response
             state["messages"].append(AIMessage(content=error_response))
             return state
     
@@ -286,11 +283,9 @@ class LangGraphResearchAgent:
             initial_state = AgentState(
                 messages=[],
                 intent=None,
-                plan=None,
                 current_step=0,
                 research_data=None,
                 knowledge_data=None,
-                final_response=None,
                 user_request=user_request,
                 session_id=session_id,
                 context=context,
@@ -306,9 +301,10 @@ class LangGraphResearchAgent:
             final_state = await self.compiled_graph.ainvoke(initial_state, config=config)
             
             return {
-                "response": final_state.get("final_response", "No response generated"),
+                "response": final_state.get("response", "No response generated"),
                 "intent": final_state.get("intent"),
-                "plan": final_state.get("plan"),
+                "tool_instructions": final_state.get("tool_instructions"),
+                "suggested_tools": final_state.get("suggested_tools"),
                 "research_data": final_state.get("research_data"),
                 "messages": [msg.content for msg in final_state.get("messages", [])]
             }
