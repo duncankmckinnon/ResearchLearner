@@ -13,7 +13,10 @@ class KnowledgeGraphManager:
     
     def __init__(self):
         self.memory = None
+        self.chroma_client = None
+        self.papers_collection = None
         self._initialize_memory()
+        self._initialize_papers_storage()
     
     def _initialize_memory(self):
         """Initialize mem0 memory instance"""
@@ -73,32 +76,77 @@ class KnowledgeGraphManager:
         except Exception as e:
             logger.error(f"Error initializing mem0: {str(e)}")
             self.memory = None
+
+    def _initialize_papers_storage(self):
+        """Initialize direct ChromaDB storage for research papers"""
+        try:
+            import chromadb
+            from chromadb.config import Settings
+
+            # Use the same ChromaDB instance as mem0 but with a separate collection
+            chroma_host = os.getenv("CHROMA_HOST")
+            chroma_port = os.getenv("CHROMA_PORT", "8000")
+
+            if chroma_host:
+                # Use containerized ChromaDB
+                self.chroma_client = chromadb.HttpClient(
+                    host=chroma_host,
+                    port=int(chroma_port)
+                )
+                logger.info(f"Using containerized ChromaDB for papers at {chroma_host}:{chroma_port}")
+            else:
+                # Use local ChromaDB with a separate directory for papers
+                persist_directory = os.path.expanduser("~/.research_learner/papers_db")
+                self.chroma_client = chromadb.PersistentClient(
+                    path=persist_directory,
+                    settings=Settings(allow_reset=True)
+                )
+                logger.info(f"Using local ChromaDB for papers at {persist_directory}")
+
+            # Create or get collection for research papers
+            self.papers_collection = self.chroma_client.get_or_create_collection(
+                name="research_papers",
+                metadata={"description": "Full research papers storage"}
+            )
+            logger.info("Research papers collection initialized successfully")
+
+        except ImportError:
+            logger.error("chromadb library not installed. Install with: pip install chromadb")
+            self.chroma_client = None
+            self.papers_collection = None
+        except Exception as e:
+            logger.error(f"Error initializing papers storage: {str(e)}")
+            self.chroma_client = None
+            self.papers_collection = None
     
     def add_research_paper(self, paper_data: Dict[str, Any]) -> bool:
-        """Add a research paper to the knowledge graph"""
-        if not self.memory:
-            logger.error("Memory not initialized")
+        """Add a research paper directly to ChromaDB storage"""
+        if not self.papers_collection:
+            logger.error("Papers storage not initialized")
             return False
-        
+
         try:
-            # Create comprehensive paper description in mem0's personal memory format
+            # Create comprehensive paper description for storage
             paper_text = self._format_paper_for_storage(paper_data)
 
-            # Format as personal knowledge that mem0 will recognize and store
-            # Use the same format as insights: "User learned about [topic]: [information]"
+            # Prepare metadata for ChromaDB
             title = paper_data.get("title", "Unknown Title")
-            formatted_text = f"User studied and read the research paper '{title}'. {paper_text}. This is important research knowledge about {title}."
+            arxiv_id = paper_data.get("paper_id", "")
 
-            # Add to memory with metadata (flatten complex types for ChromaDB)
+            # Create unique document ID
+            doc_id = f"paper_{arxiv_id}" if arxiv_id else f"paper_{hash(title)}"
+
+            # Prepare metadata (ChromaDB accepts strings, numbers, booleans)
             metadata = {
                 "type": "research_paper",
-                "arxiv_id": paper_data.get("paper_id", ""),  # ArXiv client uses "paper_id"
-                "title": paper_data.get("title", ""),
-                "published": paper_data.get("published", ""),
-                "added_date": datetime.now().isoformat()
+                "arxiv_id": arxiv_id,
+                "title": title,
+                "published": str(paper_data.get("published", "")),
+                "added_date": datetime.now().isoformat(),
+                "content_length": len(paper_text)
             }
-            
-            # Convert list fields to comma-separated strings for ChromaDB
+
+            # Convert list fields to comma-separated strings
             authors = paper_data.get("authors", [])
             if isinstance(authors, list):
                 metadata["authors"] = ", ".join(str(author) for author in authors)
@@ -114,18 +162,25 @@ class KnowledgeGraphManager:
             # Handle URLs and DOIs from PDF extraction metadata
             pdf_metadata = paper_data.get("pdf_metadata", {})
             if pdf_metadata:
-                for key, value in pdf_metadata.items():
-                    if isinstance(value, list):
-                        metadata[key] = ", ".join(str(item) for item in value)
-                    else:
-                        metadata[key] = str(value)
-            result = self.memory.add(formatted_text, user_id="default", metadata=metadata)
-            logger.info(f"Added paper to knowledge graph: {paper_data.get('title', 'Unknown')}")
-            
+                urls = pdf_metadata.get("urls", [])
+                dois = pdf_metadata.get("dois", [])
+                if isinstance(urls, list):
+                    metadata["urls"] = ", ".join(str(url) for url in urls)
+                if isinstance(dois, list):
+                    metadata["dois"] = ", ".join(str(doi) for doi in dois)
+
+            # Add to ChromaDB papers collection
+            self.papers_collection.add(
+                documents=[paper_text],
+                metadatas=[metadata],
+                ids=[doc_id]
+            )
+
+            logger.info(f"Added paper to research papers collection: {title}")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Error adding paper to knowledge graph: {str(e)}")
+            logger.error(f"Error adding paper to research papers collection: {str(e)}")
             return False
     
     def add_research_insight(self, insight: str, topic: str, paper_ids: Optional[List[str]] = None, context: Dict[str, Any] = {}) -> bool:
@@ -221,52 +276,119 @@ class KnowledgeGraphManager:
         except Exception as e:
             logger.error(f"Error searching knowledge graph: {str(e)}")
             return []
-    
+
+    def search_research_papers(self, query: str, limit: Optional[int] = 10) -> List[Dict[str, Any]]:
+        """Search research papers directly in ChromaDB"""
+        if not self.papers_collection:
+            logger.error("Papers storage not initialized")
+            return []
+
+        try:
+            logger.info(f"Searching research papers with query: {query}")
+
+            # Query the papers collection directly
+            results = self.papers_collection.query(
+                query_texts=[query],
+                n_results=limit if limit else 10
+            )
+
+            # Format results for consistent API
+            formatted_results = []
+            if results['documents'] and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    metadata = results['metadatas'][0][i] if results['metadatas'] and results['metadatas'][0] else {}
+                    distance = results['distances'][0][i] if results['distances'] and results['distances'][0] else 0
+                    doc_id = results['ids'][0][i] if results['ids'] and results['ids'][0] else ""
+
+                    formatted_results.append({
+                        "content": doc,
+                        "metadata": metadata,
+                        "relevance_score": 1.0 - distance,  # Convert distance to similarity score
+                        "id": doc_id,
+                        "source": "direct_chromadb"
+                    })
+
+            logger.info(f"Found {len(formatted_results)} research papers for query: {query}")
+            return formatted_results
+
+        except Exception as e:
+            logger.error(f"Error searching research papers: {str(e)}")
+            return []
+
+    def get_research_paper_by_id(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific research paper by ArXiv ID or document ID"""
+        if not self.papers_collection:
+            logger.error("Papers storage not initialized")
+            return None
+
+        try:
+            # Try with the formatted document ID first
+            doc_id = f"paper_{paper_id}"
+
+            try:
+                result = self.papers_collection.get(ids=[doc_id])
+                if result['documents'] and result['documents'][0]:
+                    metadata = result['metadatas'][0] if result['metadatas'] else {}
+                    return {
+                        "content": result['documents'][0],
+                        "metadata": metadata,
+                        "id": doc_id,
+                        "source": "direct_chromadb"
+                    }
+            except:
+                pass  # Document not found with this ID
+
+            # If not found, search by ArXiv ID in metadata
+            results = self.papers_collection.get(
+                where={"arxiv_id": paper_id}
+            )
+
+            if results['documents'] and results['documents'][0]:
+                metadata = results['metadatas'][0] if results['metadatas'] else {}
+                doc_id = results['ids'][0] if results['ids'] else ""
+                return {
+                    "content": results['documents'][0],
+                    "metadata": metadata,
+                    "id": doc_id,
+                    "source": "direct_chromadb"
+                }
+
+            logger.info(f"Paper not found: {paper_id}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting research paper {paper_id}: {str(e)}")
+            return None
+
     def get_related_papers(self, topic: str, limit: int = 5) -> Union[List[Optional[Dict[str, Any]]], None]:
         """Get papers related to a specific topic"""
-        if not self.memory:
-            return []
-        
         try:
             logger.info(f"Getting related papers for topic: {topic}")
-            
-            # First check memory for existing papers using type filtering
-            memory_results = self.memory.search(
-                topic,
-                user_id="default",
-                limit=limit,
-                filters={"type": "research_paper"}
-            )
-                
-            # Filter for research papers from memory
-            papers = []
-            for result in memory_results:
-                try:
-                    if isinstance(result, str):
-                        result = json.loads(result)
-                    elif isinstance(result, dict):
-                        pass
-                    else:
-                        raise ValueError(f"Unknown result type: {type(result)}")
-                    
-                    metadata = result.get("metadata", {})
-                    if metadata.get("type") == "research_paper":
-                        papers.append({
-                            "title": metadata.get("title", ""),
-                            "authors": metadata.get("authors", "").split(", ") if metadata.get("authors") else [],
-                            "arxiv_id": metadata.get("arxiv_id", ""),
-                            "categories": metadata.get("categories", "").split(", ") if metadata.get("categories") else [],
-                            "urls": [url.strip() for url in metadata.get("urls", "").split(", ") if url.strip()],
-                            "dois": [doi.strip() for doi in metadata.get("dois", "").split(", ") if doi.strip()],
-                            "relevance_score": result.get("score", 0),
-                            "content": result.get("memory", ""),
-                            "source": "knowledge_graph"
-                        })
-                except ValueError:
-                    logger.error(f"Error processing memory result: {str(result)}")
-                    continue
-                
-            # If we don't have enough papers in memory, search ArXiv
+
+            # First search our stored papers using direct ChromaDB
+            stored_papers = []
+            if self.papers_collection:
+                stored_papers = self.search_research_papers(topic, limit)
+
+                # Convert to the expected format
+                papers = []
+                for paper in stored_papers:
+                    metadata = paper.get("metadata", {})
+                    papers.append({
+                        "title": metadata.get("title", ""),
+                        "authors": metadata.get("authors", "").split(", ") if metadata.get("authors") else [],
+                        "arxiv_id": metadata.get("arxiv_id", ""),
+                        "categories": metadata.get("categories", "").split(", ") if metadata.get("categories") else [],
+                        "urls": metadata.get("urls", "").split(", ") if metadata.get("urls") else [],
+                        "dois": metadata.get("dois", "").split(", ") if metadata.get("dois") else [],
+                        "relevance_score": paper.get("relevance_score", 0),
+                        "content": paper.get("content", ""),
+                        "source": "stored_papers"
+                    })
+            else:
+                papers = []
+
+            # If we don't have enough papers in storage, search ArXiv
             if len(papers) < limit:
                 try:
                     import arxiv
@@ -276,7 +398,7 @@ class KnowledgeGraphManager:
                         sort_by=arxiv.SortCriterion.Relevance
                     )
                     client = arxiv.Client()
-                    
+
                     for result in client.results(search):
                         papers.append({
                             "title": result.title,
@@ -287,15 +409,15 @@ class KnowledgeGraphManager:
                             "content": result.summary,
                             "source": "arxiv_search"
                         })
-                        
+
                 except ImportError:
                     logger.warning("arxiv library not available for searching additional papers")
                 except Exception as e:
                     logger.error(f"Error searching ArXiv for additional papers: {str(e)}")
-                
-                logger.info(f"Found {len(papers)} related papers for topic: {topic}")
-                return papers[:limit]  # Ensure we don't exceed the limit
-            
+
+            logger.info(f"Found {len(papers)} related papers for topic: {topic}")
+            return papers[:limit]  # Ensure we don't exceed the limit
+
         except Exception as e:
             logger.error(f"Error getting related papers: {str(e)}")
             return []
