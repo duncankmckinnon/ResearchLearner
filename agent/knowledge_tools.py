@@ -50,6 +50,20 @@ class GetKnowledgeSummaryInput(BaseModel):
     topic: str = Field(description="Topic for knowledge summary")
 
 
+class DownloadAndProcessPaperInput(BaseModel):
+    """Input for downloading and processing a paper with full PDF extraction"""
+    arxiv_id: str = Field(description="ArXiv ID of the paper to download and process")
+    title: str = Field(default="", description="Title of the paper")
+    authors: List[str] = Field(default_factory=list, description="Authors of the paper")
+    categories: List[str] = Field(default_factory=list, description="Categories of the paper")
+
+
+class FindStoredPaperInput(BaseModel):
+    """Input for finding a paper already stored in the knowledge graph"""
+    query: str = Field(description="Title, ArXiv ID, or other identifying information of the paper to find")
+    limit: int = Field(default=5, description="Maximum number of results to return")
+
+
 # Async tool implementations
 class SearchKnowledgeTool(BaseTool):
     """Tool for searching the knowledge graph"""
@@ -248,14 +262,181 @@ class GetKnowledgeSummaryTool(BaseTool):
             return {"error": str(e)}
 
 
+class DownloadAndProcessPaperTool(BaseTool):
+    """Tool for downloading papers and extracting full PDF content"""
+    name: str = "download_and_process_paper"
+    description: str = "Download a paper by ArXiv ID and extract full PDF content for storage in knowledge graph"
+    args_schema: type = DownloadAndProcessPaperInput
+
+    def _run(self, arxiv_id: str, title: str = "", authors: List[str] = None, categories: List[str] = None) -> Dict[str, Any]:
+        """Synchronous version (fallback)"""
+        return asyncio.run(self._arun(arxiv_id, title, authors or [], categories or []))
+
+    async def _arun(self, arxiv_id: str, title: str = "", authors: List[str] = None, categories: List[str] = None) -> Dict[str, Any]:
+        """Download and process paper asynchronously"""
+        try:
+            from agent.arxiv_client import SimpleArxivClient
+
+            logger.info(f"Executing download_and_process_paper tool: arxiv_id='{arxiv_id}'")
+
+            # Initialize ArXiv client
+            arxiv_client = SimpleArxivClient()
+
+            # Download the paper
+            download_result = await arxiv_client.download_paper(arxiv_id)
+            if not download_result.success:
+                logger.error(f"Failed to download paper {arxiv_id}: {download_result.error}")
+                return {"success": False, "error": f"Download failed: {download_result.error}"}
+
+            # Read and extract full content
+            read_result = await arxiv_client.read_paper(arxiv_id)
+            if not read_result.success:
+                logger.error(f"Failed to read paper {arxiv_id}: {read_result.error}")
+                return {"success": False, "error": f"Read failed: {read_result.error}"}
+
+            paper_data = read_result.data
+
+            # Store in knowledge graph
+            loop = asyncio.get_event_loop()
+            kg_manager = get_knowledge_graph_manager()
+
+            def add_paper_sync():
+                return kg_manager.add_research_paper(paper_data)
+
+            storage_success = await loop.run_in_executor(None, add_paper_sync)
+
+            if storage_success:
+                logger.info(f"Successfully processed and stored paper: {arxiv_id}")
+                return {
+                    "success": True,
+                    "arxiv_id": arxiv_id,
+                    "title": paper_data.get("title", ""),
+                    "content_length": len(paper_data.get("content", "")),
+                    "urls_found": len(paper_data.get("pdf_metadata", {}).get("urls", [])),
+                    "dois_found": len(paper_data.get("pdf_metadata", {}).get("dois", []))
+                }
+            else:
+                return {"success": False, "error": "Failed to store in knowledge graph"}
+
+        except Exception as e:
+            logger.error(f"Error in download_and_process_paper tool: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+
+class FindStoredPaperTool(BaseTool):
+    """Tool for finding papers already stored in the knowledge graph"""
+    name: str = "find_stored_paper"
+    description: str = "Find papers already stored in the knowledge graph by title, ArXiv ID, or other identifying information. Use this BEFORE downloading new papers to check if they're already available with full content."
+    args_schema: type = FindStoredPaperInput
+
+    def _run(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Synchronous version (fallback)"""
+        return asyncio.run(self._arun(query, limit))
+
+    async def _arun(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Find stored papers asynchronously"""
+        try:
+            logger.info(f"Executing find_stored_paper tool: query='{query}', limit={limit}")
+
+            loop = asyncio.get_event_loop()
+            kg_manager = get_knowledge_graph_manager()
+
+            def search_papers_sync():
+                papers = []
+
+                # Try multiple search strategies
+                search_queries = [
+                    query,
+                    f"Title: {query}",
+                    f"research paper {query}",
+                    f"paper titled {query}"
+                ]
+
+                seen_arxiv_ids = set()
+
+                for search_query in search_queries:
+                    results = kg_manager.search_knowledge(search_query, limit * 2)
+
+                    for result in results:
+                        metadata = result.get("metadata", {})
+                        content = result.get("content", "")
+
+                        # Check if this is a research paper by metadata or content
+                        is_research_paper = (
+                            metadata.get("type") == "research_paper" or
+                            "Title:" in content or
+                            "Authors:" in content or
+                            "ArXiv ID:" in content or
+                            "Abstract:" in content
+                        )
+
+                        if is_research_paper:
+                            arxiv_id = metadata.get("arxiv_id", "")
+                            title = metadata.get("title", "")
+
+                            # Check for title match or ArXiv ID match
+                            query_lower = query.lower()
+                            title_match = query_lower in title.lower() if title else False
+                            arxiv_match = query_lower in arxiv_id.lower() if arxiv_id else False
+                            content_match = query_lower in content.lower() if content else False
+
+                            # Be more permissive - include if any match or if it's a research paper
+                            should_include = (title_match or arxiv_match or content_match or
+                                            (is_research_paper and not papers)) and arxiv_id not in seen_arxiv_ids
+
+                            if should_include:
+                                seen_arxiv_ids.add(arxiv_id)
+                                papers.append({
+                                    "title": title,
+                                    "authors": [author.strip() for author in metadata.get("authors", "").split(", ") if author.strip()],
+                                    "arxiv_id": arxiv_id,
+                                    "categories": [cat.strip() for cat in metadata.get("categories", "").split(", ") if cat.strip()],
+                                    "urls": [url.strip() for url in metadata.get("urls", "").split(", ") if url.strip()],
+                                    "dois": [doi.strip() for doi in metadata.get("dois", "").split(", ") if doi.strip()],
+                                    "content": content,
+                                    "relevance_score": result.get("relevance_score", 0),
+                                    "source": "knowledge_graph_stored",
+                                    "has_full_content": "Full Paper Content:" in content,
+                                    "match_type": "title" if title_match else "arxiv_id" if arxiv_match else "content"
+                                })
+
+                                if len(papers) >= limit:
+                                    break
+
+                    if len(papers) >= limit:
+                        break
+
+                return papers[:limit]
+
+            papers = await loop.run_in_executor(None, search_papers_sync)
+            logger.info(f"find_stored_paper tool completed: found {len(papers)} stored papers")
+
+            # Debug logging
+            if not papers:
+                logger.info(f"No papers found for query: '{query}'. Checking raw search results...")
+                debug_results = kg_manager.search_knowledge(query, 5)
+                logger.info(f"Raw search returned {len(debug_results)} results")
+                for i, result in enumerate(debug_results[:3]):
+                    metadata = result.get("metadata", {})
+                    content_preview = result.get("content", "")[:200] + "..." if len(result.get("content", "")) > 200 else result.get("content", "")
+                    logger.info(f"Result {i}: type={metadata.get('type')}, title={metadata.get('title')}, content_preview={content_preview}")
+
+            return papers
+
+        except Exception as e:
+            logger.error(f"Error in find_stored_paper tool: {str(e)}")
+            return []
+
+
 # Tool registry for easy access
 KNOWLEDGE_TOOLS = [
     SearchKnowledgeTool(),
     GetRelatedPapersTool(),
     GetResearchInsightsTool(),
-    AddResearchPaperTool(),
     AddResearchInsightTool(),
     GetKnowledgeSummaryTool(),
+    DownloadAndProcessPaperTool(),
+    FindStoredPaperTool(),
 ]
 
 # Tool mapping for quick lookup

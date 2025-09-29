@@ -81,13 +81,18 @@ class KnowledgeGraphManager:
             return False
         
         try:
-            # Create comprehensive paper description
+            # Create comprehensive paper description in mem0's personal memory format
             paper_text = self._format_paper_for_storage(paper_data)
-            
+
+            # Format as personal knowledge that mem0 will recognize and store
+            # Use the same format as insights: "User learned about [topic]: [information]"
+            title = paper_data.get("title", "Unknown Title")
+            formatted_text = f"User studied and read the research paper '{title}'. {paper_text}. This is important research knowledge about {title}."
+
             # Add to memory with metadata (flatten complex types for ChromaDB)
             metadata = {
                 "type": "research_paper",
-                "arxiv_id": paper_data.get("paper_id", ""),
+                "arxiv_id": paper_data.get("paper_id", ""),  # ArXiv client uses "paper_id"
                 "title": paper_data.get("title", ""),
                 "published": paper_data.get("published", ""),
                 "added_date": datetime.now().isoformat()
@@ -114,7 +119,7 @@ class KnowledgeGraphManager:
                         metadata[key] = ", ".join(str(item) for item in value)
                     else:
                         metadata[key] = str(value)
-            result = self.memory.add(paper_text, user_id="default", metadata=metadata)
+            result = self.memory.add(formatted_text, user_id="default", metadata=metadata)
             logger.info(f"Added paper to knowledge graph: {paper_data.get('title', 'Unknown')}")
             
             return True
@@ -165,15 +170,26 @@ class KnowledgeGraphManager:
             logger.error(f"Error adding research insight: {str(e)}")
             return False
     
-    def search_knowledge(self, query: str, limit: Optional[int] = 10) -> List[Dict[str, Any]]:
-        """Search the knowledge graph"""
+    def search_knowledge(self, query: str, limit: Optional[int] = 10, content_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search the knowledge graph with optional type filtering"""
         if not self.memory:
             logger.error("Memory not initialized")
             return []
-        
+
         try:
-            logger.info(f"Searching knowledge graph with query: {query}")
-            response = self.memory.search(query, user_id="default", limit=limit if limit else 10)
+            logger.info(f"Searching knowledge graph with query: {query}, type filter: {content_type}")
+
+            # Add metadata filtering if content_type is specified
+            search_params = {
+                "query": query,
+                "user_id": "default",
+                "limit": limit if limit else 10
+            }
+
+            if content_type:
+                search_params["filters"] = {"type": content_type}
+
+            response = self.memory.search(**search_params)
             logger.info(f"Raw mem0 response: {response}")
 
             # Extract results from mem0 response format
@@ -214,11 +230,12 @@ class KnowledgeGraphManager:
         try:
             logger.info(f"Getting related papers for topic: {topic}")
             
-            # First check memory for existing papers
+            # First check memory for existing papers using type filtering
             memory_results = self.memory.search(
-                f"research papers about {topic}", 
-                user_id="default", 
-                limit=limit
+                topic,
+                user_id="default",
+                limit=limit,
+                filters={"type": "research_paper"}
             )
                 
             # Filter for research papers from memory
@@ -293,26 +310,13 @@ class KnowledgeGraphManager:
             
             # Search for insights specifically - use multiple search terms
             
-            # Try multiple search approaches to find insights
-            search_terms = [
-                f"Research insight on {topic}",
-                f"research insights {topic}",
-                f"{topic} insights",
-                f"{topic} findings"
-            ]
-            
-            all_results = []
-            for search_term in search_terms:
-                try:
-                    term_results = self.memory.search(
-                        search_term, 
-                        user_id="default", 
-                        limit=limit//len(search_terms) + 2  # Get more results per term
-                    )
-                    all_results.extend(term_results)
-                except Exception as e:
-                    logger.warning(f"Search term '{search_term}' failed: {e}")
-                    continue
+            # Search for insights using type filtering
+            all_results = self.memory.search(
+                topic,
+                user_id="default",
+                limit=limit,
+                filters={"type": "research_insight"}
+            )
             
             # Remove duplicates based on memory content
             seen_content = set()

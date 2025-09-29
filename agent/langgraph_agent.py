@@ -52,11 +52,6 @@ class LangGraphResearchAgent:
         
         self.research_agent = SimpleResearchAgent()
         
-        # Knowledge graph access will be through tools only
-        
-        # Create prompts instance
-        self.prompts = Prompts()
-        
         # Note: Using simplified three-node architecture instead of separate node classes
         
         # Create tool node for knowledge tools
@@ -109,7 +104,7 @@ class LangGraphResearchAgent:
             
             # Use LLM to detect intent with detailed prompting
             logger.info(f"Intent detection prompt setup")
-            prompt = self.prompts.intent_detection_prompt.format_messages(
+            prompt = Prompts.intent_detection_prompt.format_messages(
                 user_request=user_request,
                 context=context
             )
@@ -173,7 +168,7 @@ class LangGraphResearchAgent:
             tool_call_count = state.get("tool_call_count", 0)
             
             # Use prompt from prompts class
-            prompt_messages = self.prompts.agent_execution_prompt.format_messages(
+            prompt_messages = Prompts.agent_execution_prompt.format_messages(
                 instructions=tool_instructions,
                 suggested_tools=', '.join(suggested_tools),
                 user_request=user_request,
@@ -256,7 +251,7 @@ class LangGraphResearchAgent:
             }
 
             # Use the response generation prompt from prompts class
-            prompt_messages = self.prompts.response_generation_prompt.format_messages(
+            prompt_messages = Prompts.response_generation_prompt.format_messages(
                 user_request=user_request,
                 research_data=str(research_data)
             )

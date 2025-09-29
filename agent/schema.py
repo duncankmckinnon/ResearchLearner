@@ -11,9 +11,10 @@ class RequestFormat(BaseModel):
 class ResponseFormat(BaseModel):
     response: str = Field(description="The response to the request")
     intent: Optional[str] = Field(default=None, description="The detected intent of the request")
-    plan: Optional[List[str]] = Field(default=None, description="The execution plan created for the request")
     research_data: Optional[Dict[str, Any]] = Field(default=None, description="Research data if applicable")
-
+    tool_instructions: Optional[str] = Field(default=None, description="The instructions for what tools to use and when")
+    suggested_tools: Optional[List[str]] = Field(default=None, description="The suggested tools to use for the request")
+    messages: Optional[List[str]] = Field(default=None, description="The messages to the request")
 
 class KnowledgeSearchRequest(BaseModel):
     query: str = Field(description="Search query for the knowledge store")

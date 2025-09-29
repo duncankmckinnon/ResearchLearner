@@ -124,20 +124,26 @@ async def process_request_stream(request: RequestFormat):
                         response_dict = response.dict()
                         response_text = response_dict.get('response', 'No response generated')
                         response_intent = response_dict.get('intent', None)
-                        response_plan = response_dict.get('plan', None)
+                        response_plan = response_dict.get('instructions', None)
+                        response_suggested_tools = response_dict.get('suggested_tools', None)
+                        response_messages = response_dict.get('messages', None)
                         logger.info(f"Pydantic response dict: {response_dict}")
                     else:
                         # It's a regular object
                         response_text = getattr(response, 'response', 'No response generated')
                         response_intent = getattr(response, 'intent', None)
-                        response_plan = getattr(response, 'plan', None)
+                        response_plan = getattr(response, 'instructions', None)
+                        response_suggested_tools = getattr(response, 'suggested_tools', None)
+                        response_messages = getattr(response, 'messages', None)
                         logger.info(f"Regular object response - text: {response_text[:100]}...")
                     
                     response_data = {
-                        'type': 'response', 
+                        'type': 'response',
                         'response': response_text, 
                         'intent': response_intent, 
-                        'plan': response_plan
+                        'instructions': response_plan,
+                        'suggested_tools': response_suggested_tools,
+                        'messages': response_messages
                     }
                     logger.info(f"Sending response event: {response_data}")
                     
@@ -150,7 +156,9 @@ async def process_request_stream(request: RequestFormat):
                         'type': 'response',
                         'response': 'I apologize, but there was an issue formatting the response. Please try again.',
                         'intent': None,
-                        'plan': None
+                        'instructions': None,
+                        'suggested_tools': None,
+                        'messages': None
                     }
                     yield f"data: {json.dumps(fallback_response)}\n\n"
                 
